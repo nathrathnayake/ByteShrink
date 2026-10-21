@@ -18,6 +18,7 @@ import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.TransferHandler;
 import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -29,6 +30,8 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.datatransfer.DataFlavor;
+import java.io.File;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
@@ -142,9 +145,47 @@ public final class ArchiveMateApp {
     private JPanel buildInputsCard() {
         JPanel card = card();
         card.setLayout(new BorderLayout(0, 10));
-        card.add(sectionLabel("1. Choose what to compress"), BorderLayout.NORTH);
+        card.add(sectionLabel("1. Choose what to compress (or drop items into the list)"), BorderLayout.NORTH);
         inputList.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         inputList.setVisibleRowCount(7);
+        inputList.setToolTipText("Drop files or folders here to add them to the archive.");
+        inputList.setTransferHandler(new TransferHandler() {
+            @Override
+            public boolean canImport(TransferSupport support) {
+                return support.isDrop() && support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+            }
+
+            @Override
+            public boolean importData(TransferSupport support) {
+                if (!canImport(support)) return false;
+                try {
+                    Object data = support.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+                    if (!(data instanceof List<?> files)) return false;
+                    int added = 0;
+                    int skipped = 0;
+                    for (Object item : files) {
+                        if (item instanceof File file && Files.exists(file.toPath())) {
+                            if (addInput(file.toPath())) added++;
+                            else skipped++;
+                        } else {
+                            skipped++;
+                        }
+                    }
+                    if (added == 0) {
+                        statusLabel.setText("No new files or folders were added.");
+                        return false;
+                    }
+                    String count = added == 1 ? "1 item" : added + " items";
+                    String skippedLabel = skipped == 1 ? "item" : "items";
+                    String skippedNote = skipped == 0 ? "" : " (" + skipped + " unsupported or duplicate " + skippedLabel + " skipped)";
+                    statusLabel.setText("Added " + count + skippedNote + ".");
+                    return true;
+                } catch (Exception ex) {
+                    statusLabel.setText("Could not read the dropped items.");
+                    return false;
+                }
+            }
+        });
         inputList.setCellRenderer((list, value, index, selected, focus) -> {
             JLabel row = new JLabel(value.toString());
             row.setBorder(new EmptyBorder(7, 9, 7, 9));
@@ -262,14 +303,15 @@ public final class ArchiveMateApp {
         }
     }
 
-    private void addInput(Path path) {
+    private boolean addInput(Path path) {
         Path normalized = path.toAbsolutePath().normalize();
-        for (int i = 0; i < inputModel.size(); i++) if (inputModel.get(i).equals(normalized)) return;
+        for (int i = 0; i < inputModel.size(); i++) if (inputModel.get(i).equals(normalized)) return false;
         inputModel.addElement(normalized);
         if (outputField.getText().isBlank()) {
             Path parent = normalized.getParent();
             outputField.setText((parent == null ? Path.of("compressed-archive.zip") : parent.resolve("compressed-archive.zip")).toString());
         }
+        return true;
     }
 
     private void chooseOutput() {
