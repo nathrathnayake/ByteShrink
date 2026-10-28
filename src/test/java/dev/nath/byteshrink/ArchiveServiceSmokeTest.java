@@ -13,6 +13,7 @@ public final class ArchiveServiceSmokeTest {
         Path root = Files.createTempDirectory("byteshrink-test-");
         try {
             Path folder = Files.createDirectories(root.resolve("sample-folder/nested"));
+            Files.createDirectories(root.resolve("empty-folder"));
             byte[] repeated = "ByteShrink keeps the original data intact.\n".repeat(30_000).getBytes(StandardCharsets.UTF_8);
             Files.write(folder.resolve("notes.txt"), repeated);
             byte[] randomBytes = new byte[16_384];
@@ -21,14 +22,17 @@ public final class ArchiveServiceSmokeTest {
 
             Path normalArchive = root.resolve("normal.zip");
             ArchiveService.Result normal = new ArchiveService().compress(
-                    List.of(root.resolve("sample-folder"), root.resolve("random.bin")), normalArchive, 9, null,
+                    List.of(root.resolve("sample-folder"), root.resolve("empty-folder"), root.resolve("random.bin")), normalArchive, 9, null,
                     (step, steps, done, total, detail) -> {}, () -> false);
             check(Files.isRegularFile(normalArchive), "normal archive was not created");
             check(normal.fileCount() == 2, "wrong file count");
+            check(normal.directoryCount() == 3, "wrong directory count");
             check(normal.archiveBytes() == Files.size(normalArchive), "reported archive size is wrong");
             try (ZipFile zip = new ZipFile(normalArchive.toFile())) {
                 check(zip.getEntry("sample-folder/nested/notes.txt") != null, "folder structure was not preserved");
+                check(zip.getEntry("empty-folder/") != null, "empty folder was not preserved");
                 check(zip.getEntry("random.bin") != null, "standalone file was not added");
+                check(zip.size() == normal.fileCount() + normal.directoryCount(), "archive is missing planned entries");
                 try (var input = zip.getInputStream(zip.getEntry("sample-folder/nested/notes.txt"))) {
                     check(java.util.Arrays.equals(input.readAllBytes(), repeated), "compressed text did not round-trip");
                 }
@@ -78,7 +82,7 @@ public final class ArchiveServiceSmokeTest {
             check(java.util.Arrays.equals(Files.readAllBytes(protectedArchive), keepExisting),
                     "cancellation modified an existing destination");
 
-            System.out.println("PASS: round-trip integrity, target sizing, duplicate names, and cancellation safety");
+            System.out.println("PASS: round-trip integrity, entry coverage, empty folders, target sizing, duplicate names, and cancellation safety");
         } finally {
             try (var paths = Files.walk(root)) {
                 paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {

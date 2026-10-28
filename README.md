@@ -8,7 +8,7 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 - Accepts files and folders by drag and drop into the desktop input list.
 - Offers ZIP/Deflate levels 0–9, from store-only to maximum compression.
 - Can test every level and keep the smallest result when you set a maximum archive size.
-- Verifies every archive by reading it back and checking file sizes and CRC checksums before replacing the destination.
+- Verifies that every planned file and folder is present, no unexpected entries exist, and each file's size and CRC match before replacing the destination.
 - Keeps folder structure, supports empty folders, and avoids collisions when selected items have the same name.
 - Leaves the original files untouched. Cancelling removes the temporary archive.
 - Includes a command-line mode for scripts and headless systems.

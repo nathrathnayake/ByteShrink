@@ -11,8 +11,10 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.zip.CRC32;
@@ -72,7 +74,7 @@ public final class ArchiveService {
                 int progressStep = attempt;
                 writeZip(plan, temporary, candidateLevel, totalBytes,
                         (done, detail) -> progress.onProgress(progressStep, levels.length, done, totalBytes, detail), cancelled);
-                verifyZip(temporary, cancelled);
+                verifyZip(temporary, plan, cancelled);
                 long candidateBytes = Files.size(temporary);
                 if (best == null || candidateBytes < best.bytes()) {
                     if (best != null) {
@@ -212,13 +214,26 @@ public final class ArchiveService {
         }
     }
 
-    private void verifyZip(Path archive, BooleanSupplier cancelled) throws IOException {
+    private void verifyZip(Path archive, Plan plan, BooleanSupplier cancelled) throws IOException {
+        Map<String, Item> expectedEntries = new HashMap<>();
+        for (Item item : plan.items()) {
+            if (expectedEntries.put(item.entryName(), item) != null) {
+                throw new IOException("Archive plan contains duplicate entry: " + item.entryName());
+            }
+        }
         try (ZipFile zip = new ZipFile(archive.toFile())) {
             byte[] buffer = new byte[BUFFER_SIZE];
             var entries = zip.entries();
             while (entries.hasMoreElements()) {
                 checkCancelled(cancelled);
                 ZipEntry entry = entries.nextElement();
+                Item expected = expectedEntries.remove(entry.getName());
+                if (expected == null) {
+                    throw new IOException("Archive verification found an unexpected or duplicate entry: " + entry.getName());
+                }
+                if (expected.directory() != entry.isDirectory()) {
+                    throw new IOException("Archive verification found an entry with the wrong type: " + entry.getName());
+                }
                 if (entry.isDirectory()) continue;
                 CRC32 crc = new CRC32();
                 long size = 0;
@@ -234,6 +249,9 @@ public final class ArchiveService {
                     throw new IOException("Archive verification failed for " + entry.getName());
                 }
             }
+        }
+        if (!expectedEntries.isEmpty()) {
+            throw new IOException("Archive verification found a missing entry: " + expectedEntries.keySet().iterator().next());
         }
     }
 
