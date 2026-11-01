@@ -11,6 +11,7 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 - Verifies that every planned file and folder is present, no unexpected entries exist, and each file's size and CRC match before replacing the destination.
 - Keeps folder structure, supports empty folders, and avoids collisions when selected items have the same name.
 - Leaves the original files untouched. Cancelling removes the temporary archive.
+- Rejects output paths that refer to an input file through a different path, such as a symbolic-link folder alias.
 - Includes a command-line mode for scripts and headless systems.
 
 ## Important limit

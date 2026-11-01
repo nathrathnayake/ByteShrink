@@ -1,5 +1,6 @@
 package dev.nath.byteshrink;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -68,6 +69,8 @@ public final class ArchiveServiceSmokeTest {
                         "duplicate top-level names were not made unique");
             }
 
+            checkInputFileProtection(root);
+
             Path protectedArchive = root.resolve("protected.zip");
             byte[] keepExisting = "preserve existing destination".getBytes(StandardCharsets.UTF_8);
             Files.write(protectedArchive, keepExisting);
@@ -82,7 +85,7 @@ public final class ArchiveServiceSmokeTest {
             check(java.util.Arrays.equals(Files.readAllBytes(protectedArchive), keepExisting),
                     "cancellation modified an existing destination");
 
-            System.out.println("PASS: round-trip integrity, entry coverage, empty folders, target sizing, duplicate names, and cancellation safety");
+            System.out.println("PASS: round-trip integrity, entry coverage, empty folders, target sizing, duplicate names, input-file protection, and cancellation safety");
         } finally {
             try (var paths = Files.walk(root)) {
                 paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
@@ -90,6 +93,39 @@ public final class ArchiveServiceSmokeTest {
                 });
             }
         }
+    }
+
+    private static void checkInputFileProtection(Path root) throws Exception {
+        Path sourceDirectory = Files.createDirectories(root.resolve("alias-source"));
+        Path source = sourceDirectory.resolve("original.txt");
+        byte[] original = "Keep this original file intact.".getBytes(StandardCharsets.UTF_8);
+        Files.write(source, original);
+        checkOverwriteRefused(source, source, original);
+
+        Path aliasDirectory = root.resolve("alias-directory");
+        try {
+            Files.createSymbolicLink(aliasDirectory, sourceDirectory);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            System.out.println("SKIP: symbolic-link alias test (link creation unavailable: "
+                    + unavailable.getClass().getSimpleName() + ")");
+            return;
+        }
+        Path alias = aliasDirectory.resolve("original.txt");
+        checkOverwriteRefused(source, alias, original);
+        checkOverwriteRefused(alias, source, original);
+    }
+
+    private static void checkOverwriteRefused(Path input, Path output, byte[] original) throws Exception {
+        boolean refused = false;
+        try {
+            new ArchiveService().compress(List.of(input), output, 6, null,
+                    (step, steps, done, total, detail) -> {}, () -> false);
+        } catch (IllegalArgumentException expected) {
+            refused = true;
+        }
+        check(refused, "compression did not reject an output referring to its input");
+        check(java.util.Arrays.equals(Files.readAllBytes(input), original), "input was changed by a refused overwrite");
+        check(java.util.Arrays.equals(Files.readAllBytes(output), original), "output alias no longer refers to the original data");
     }
 
     private static void check(boolean condition, String message) {

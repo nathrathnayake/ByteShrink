@@ -55,8 +55,10 @@ public final class ArchiveService {
 
         Plan plan = makePlan(inputs, destination);
         if (plan.items().isEmpty()) throw new IllegalArgumentException("The selected folders contain no regular files or folders to archive.");
+        boolean destinationExists = Files.exists(destination);
         for (Item item : plan.items()) {
-            if (!item.directory() && item.source().equals(destination)) {
+            if (!item.directory() && (item.source().equals(destination)
+                    || (destinationExists && Files.isSameFile(item.source(), destination)))) {
                 throw new IllegalArgumentException("The archive cannot overwrite one of its input files.");
             }
         }
