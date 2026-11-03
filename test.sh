@@ -10,3 +10,4 @@ else
   find src/test/java -name '*.java' -print0 | xargs -0 java -m jdk.compiler/com.sun.tools.javac.Main --release 17 -encoding UTF-8 -cp build/classes -d build/test-classes
 fi
 java -ea -cp build/classes:build/test-classes dev.nath.byteshrink.ArchiveServiceSmokeTest
+java -ea -Djava.awt.headless=true -cp build/classes:build/test-classes dev.nath.byteshrink.ArchiveMateAppSmokeTest

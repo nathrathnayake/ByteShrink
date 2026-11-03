@@ -35,6 +35,8 @@ On macOS or Linux:
 
 On Windows, run `build.bat`, then launch with `java -jar build\byteshrink.jar`.
 
+The desktop input list supports multiple selection. **Remove selected** removes only the selected entries; **Clear** removes every entry from the list.
+
 ## Command-line use
 
 ```bash
@@ -57,6 +59,7 @@ To try to keep the archive under 25 MB:
 ```
 
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
+Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
 
 ## ZIP level guide
 

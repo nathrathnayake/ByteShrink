@@ -284,12 +284,17 @@ public final class ArchiveMateApp {
     private void bindActions() {
         addFilesButton.addActionListener(e -> chooseInputs(false));
         addFolderButton.addActionListener(e -> chooseInputs(true));
-        removeButton.addActionListener(e -> {
-            for (int index : inputList.getSelectedIndices()) inputModel.remove(index);
-        });
+        removeButton.addActionListener(e -> removeSelectedInputs(inputModel, inputList.getSelectedIndices()));
         clearButton.addActionListener(e -> inputModel.clear());
         compressButton.addActionListener(e -> startCompression());
         cancelButton.addActionListener(e -> { if (worker != null) worker.cancel(true); });
+    }
+
+    static void removeSelectedInputs(DefaultListModel<Path> inputs, int[] selectedIndices) {
+        // JList returns ascending indices; removing from the end keeps earlier indices valid.
+        for (int i = selectedIndices.length - 1; i >= 0; i--) {
+            inputs.remove(selectedIndices[i]);
+        }
     }
 
     private void chooseInputs(boolean directoriesOnly) {
