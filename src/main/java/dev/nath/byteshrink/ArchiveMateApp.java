@@ -43,6 +43,8 @@ import java.util.concurrent.CancellationException;
 
 /** Desktop entry point for ByteShrink. */
 public final class ArchiveMateApp {
+    private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] <file-or-folder>...";
+
     private final JFrame frame = new JFrame("ByteShrink — File Compressor");
     private final DefaultListModel<Path> inputModel = new DefaultListModel<>();
     private final JList<Path> inputList = new JList<>(inputModel);
@@ -68,6 +70,10 @@ public final class ArchiveMateApp {
     }
 
     public static void main(String[] args) {
+        if (args.length > 0 && isHelp(args[0])) {
+            printCliHelp();
+            return;
+        }
         if (args.length > 0 && "--cli".equals(args[0])) {
             runCli(args);
             return;
@@ -443,9 +449,35 @@ public final class ArchiveMateApp {
         return new DecimalFormat("0.00").format(value) + " " + units[unit];
     }
 
+    private static boolean isHelp(String argument) {
+        return "--help".equals(argument) || "-h".equals(argument);
+    }
+
+    private static void printCliHelp() {
+        System.out.println(CLI_USAGE);
+        System.out.println("""
+
+                Options:
+                  --output <path>     Destination ZIP archive (required).
+                  --level <0-9>       Compression level; defaults to 9. Level 0 stores files.
+                  --target-mb <size>  Try every level and keep the smallest verified ZIP.
+                  --help, -h          Show this help without opening the desktop app.
+
+                Target sizes are best effort: lossless compression cannot guarantee a chosen size.
+                Original input files are left untouched.
+
+                Example:
+                  java -jar byteshrink.jar --cli --output backup.zip --level 9 ./Documents
+                """);
+    }
+
     private static void runCli(String[] args) {
+        if (args.length > 1 && isHelp(args[1])) {
+            printCliHelp();
+            return;
+        }
         if (args.length < 4) {
-            System.err.println("Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] <file-or-folder>...");
+            System.err.println(CLI_USAGE);
             System.exit(2);
         }
         Path output = null;

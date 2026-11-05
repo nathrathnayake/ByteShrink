@@ -39,6 +39,14 @@ The desktop input list supports multiple selection. **Remove selected** removes 
 
 ## Command-line use
 
+To display the options without opening the desktop app:
+
+```bash
+./run.sh --help
+```
+
+`-h`, `--cli --help`, and `--cli -h` also display help and exit successfully.
+
 ```bash
 ./run.sh --cli --output backup.zip --level 9 ./Documents ./notes.txt
 ```
@@ -60,6 +68,7 @@ To try to keep the archive under 25 MB:
 
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
+The built JAR is checked with all four help forms in a headless environment.
 
 ## ZIP level guide
 
