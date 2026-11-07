@@ -70,6 +70,7 @@ public final class ArchiveServiceSmokeTest {
             }
 
             checkInputFileProtection(root);
+            checkOutputDirectoryPlanning(root);
 
             Path protectedArchive = root.resolve("protected.zip");
             byte[] keepExisting = "preserve existing destination".getBytes(StandardCharsets.UTF_8);
@@ -85,13 +86,40 @@ public final class ArchiveServiceSmokeTest {
             check(java.util.Arrays.equals(Files.readAllBytes(protectedArchive), keepExisting),
                     "cancellation modified an existing destination");
 
-            System.out.println("PASS: round-trip integrity, entry coverage, empty folders, target sizing, duplicate names, input-file protection, and cancellation safety");
+            System.out.println("PASS: round-trip integrity, entry coverage, empty folders, target sizing, duplicate names, input-file protection, output-folder planning, and cancellation safety");
         } finally {
             try (var paths = Files.walk(root)) {
                 paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                     try { Files.deleteIfExists(path); } catch (Exception ignored) {}
                 });
             }
+        }
+    }
+
+    private static void checkOutputDirectoryPlanning(Path root) throws Exception {
+        Path missingSource = root.resolve("missing-source");
+        Path invalidOutput = missingSource.resolve("exports/archive.zip");
+        boolean refused = false;
+        try {
+            new ArchiveService().compress(List.of(missingSource), invalidOutput, 6, null,
+                    (step, steps, done, total, detail) -> {}, () -> false);
+        } catch (IOException expected) {
+            refused = true;
+        }
+        check(refused, "a missing source was not rejected before output-folder creation");
+        check(!Files.exists(missingSource), "output-folder creation manufactured a missing source");
+
+        Path source = Files.createDirectories(root.resolve("nested-output-source"));
+        Files.writeString(source.resolve("notes.txt"), "Archive only the selected source contents.");
+        Path output = source.resolve("new-output/nested/archive.zip");
+        ArchiveService.Result result = new ArchiveService().compress(List.of(source), output, 6, null,
+                (step, steps, done, total, detail) -> {}, () -> false);
+        check(Files.isRegularFile(output), "nested output archive was not created");
+        check(result.fileCount() == 1 && result.directoryCount() == 1,
+                "new output folders were counted as selected source contents");
+        try (ZipFile zip = new ZipFile(output.toFile())) {
+            check(zip.getEntry("nested-output-source/notes.txt") != null, "selected source file was not archived");
+            check(zip.size() == 2, "new output folders were included in the archive");
         }
     }
 

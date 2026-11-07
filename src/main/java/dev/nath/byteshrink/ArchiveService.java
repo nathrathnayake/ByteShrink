@@ -50,7 +50,6 @@ public final class ArchiveService {
         Path destination = output.toAbsolutePath().normalize();
         Path parent = destination.getParent();
         if (parent == null) throw new IllegalArgumentException("Choose a valid output location.");
-        Files.createDirectories(parent);
         if (Files.isDirectory(destination)) throw new IllegalArgumentException("The output path points to a folder.");
 
         Plan plan = makePlan(inputs, destination);
@@ -63,6 +62,7 @@ public final class ArchiveService {
             }
         }
 
+        Files.createDirectories(parent);
         List<Path> temporaryFiles = new ArrayList<>();
         try {
             Candidate best = null;
