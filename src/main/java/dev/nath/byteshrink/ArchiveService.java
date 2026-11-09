@@ -46,22 +46,25 @@ public final class ArchiveService {
         if (level < 0 || level > 9) throw new IllegalArgumentException("Compression level must be between 0 and 9.");
         if (targetBytes != null && targetBytes < 1) throw new IllegalArgumentException("The target size must be greater than zero.");
         if (inputs == null || inputs.isEmpty()) throw new IllegalArgumentException("Add at least one file or folder.");
+        checkCancelled(cancelled);
 
         Path destination = output.toAbsolutePath().normalize();
         Path parent = destination.getParent();
         if (parent == null) throw new IllegalArgumentException("Choose a valid output location.");
         if (Files.isDirectory(destination)) throw new IllegalArgumentException("The output path points to a folder.");
 
-        Plan plan = makePlan(inputs, destination);
+        Plan plan = makePlan(inputs, destination, cancelled);
         if (plan.items().isEmpty()) throw new IllegalArgumentException("The selected folders contain no regular files or folders to archive.");
         boolean destinationExists = Files.exists(destination);
         for (Item item : plan.items()) {
+            checkCancelled(cancelled);
             if (!item.directory() && (item.source().equals(destination)
                     || (destinationExists && Files.isSameFile(item.source(), destination)))) {
                 throw new IllegalArgumentException("The archive cannot overwrite one of its input files.");
             }
         }
 
+        checkCancelled(cancelled);
         Files.createDirectories(parent);
         List<Path> temporaryFiles = new ArrayList<>();
         try {
@@ -107,9 +110,10 @@ public final class ArchiveService {
         }
     }
 
-    private Plan makePlan(List<Path> inputs, Path destination) throws IOException {
+    private Plan makePlan(List<Path> inputs, Path destination, BooleanSupplier cancelled) throws IOException {
         List<Path> roots = new ArrayList<>();
         for (Path input : inputs) {
+            checkCancelled(cancelled);
             if (input == null) continue;
             Path path = input.toAbsolutePath().normalize();
             if (!Files.exists(path)) throw new IOException("Input no longer exists: " + path);
@@ -125,12 +129,14 @@ public final class ArchiveService {
         int[] fileCount = { 0 };
         int[] directoryCount = { 0 };
         for (Path root : roots) {
+            checkCancelled(cancelled);
             String baseName = cleanSegment(root.getFileName() == null ? "archive-root" : root.getFileName().toString());
             String uniqueName = uniqueName(baseName, usedRootNames);
             if (Files.isDirectory(root)) {
                 Files.walkFileTree(root, new SimpleFileVisitor<>() {
                     @Override
                     public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                        checkCancelled(cancelled);
                         String relative = root.relativize(directory).toString().replace('\\', '/');
                         String entry = relative.isEmpty() ? uniqueName + "/" : uniqueName + "/" + cleanRelative(relative) + "/";
                         items.add(new Item(directory, entry, true));
@@ -139,6 +145,7 @@ public final class ArchiveService {
                     }
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                        checkCancelled(cancelled);
                         if (file.toAbsolutePath().normalize().equals(destination)) return FileVisitResult.CONTINUE;
                         if (attrs.isRegularFile()) {
                             String relative = cleanRelative(root.relativize(file).toString().replace('\\', '/'));

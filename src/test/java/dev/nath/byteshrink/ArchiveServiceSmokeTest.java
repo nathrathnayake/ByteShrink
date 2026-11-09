@@ -71,6 +71,7 @@ public final class ArchiveServiceSmokeTest {
 
             checkInputFileProtection(root);
             checkOutputDirectoryPlanning(root);
+            checkPlanningCancellation(root);
 
             Path protectedArchive = root.resolve("protected.zip");
             byte[] keepExisting = "preserve existing destination".getBytes(StandardCharsets.UTF_8);
@@ -94,6 +95,28 @@ public final class ArchiveServiceSmokeTest {
                 });
             }
         }
+    }
+
+    private static void checkPlanningCancellation(Path root) throws Exception {
+        Path source = Files.createDirectories(root.resolve("cancel-scan-source"));
+        for (int i = 0; i < 12; i++) {
+            Files.writeString(source.resolve("file-" + i + ".txt"), "Keep this source data.");
+        }
+        Path outputFolder = root.resolve("cancel-scan-output/nested");
+        int[] polls = { 0 };
+        boolean cancelled = false;
+        try {
+            // Allow scanning to begin, then request cancellation on a later poll.
+            new ArchiveService().compress(List.of(source), outputFolder.resolve("archive.zip"), 6, null,
+                    (step, steps, done, total, detail) -> {}, () -> ++polls[0] >= 5);
+        } catch (java.util.concurrent.CancellationException expected) {
+            cancelled = true;
+        }
+        check(cancelled, "cancellation during folder scanning was not observed");
+        check(!Files.exists(root.resolve("cancel-scan-output")), "planning cancellation created output folders");
+        check(Files.readString(source.resolve("file-0.txt")).equals("Keep this source data."),
+                "planning cancellation changed source data");
+        System.out.println("PASS: cancellation during folder scanning leaves output folders uncreated");
     }
 
     private static void checkOutputDirectoryPlanning(Path root) throws Exception {
