@@ -60,6 +60,12 @@ To try to keep the archive under 25 MB:
 
 `--target-mb` runs all ten ZIP levels and chooses the smallest verified output. A target value is best-effort and does not discard information.
 
+Use `--` before input paths whose names look like options. Every argument after it is treated as a file or folder path:
+
+```bash
+./run.sh --cli --output backup.zip -- --level --output
+```
+
 ## Build and test
 
 ```bash
@@ -69,7 +75,7 @@ To try to keep the archive under 25 MB:
 
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
-The built JAR is checked with all four help forms in a headless environment.
+The built JAR is checked in a headless environment with all four help forms and input filenames that look like options.
 
 ## ZIP level guide
 

@@ -5,14 +5,16 @@ import javax.swing.JList;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipFile;
 
-/** Headless checks for desktop input removal and command-line help. */
+/** Headless checks for desktop input removal and command-line behavior. */
 public final class ArchiveMateAppSmokeTest {
     private static final List<Path> INPUTS = List.of(
             Path.of("one.txt"), Path.of("two.txt"), Path.of("three.txt"),
@@ -32,6 +34,8 @@ public final class ArchiveMateAppSmokeTest {
         checkCliHelp("--cli", "--help");
         checkCliHelp("--cli", "-h");
         System.out.println("PASS: CLI help (long and short flags, with and without --cli)");
+        checkCliEndOfOptions();
+        System.out.println("PASS: CLI -- separator preserves option-like input filenames and contents");
     }
 
     private static void checkRemoval(int[] selection, List<Path> expected) {
@@ -47,6 +51,49 @@ public final class ArchiveMateAppSmokeTest {
         if (!actual.equals(expected)) {
             throw new AssertionError("Removing " + Arrays.toString(selection)
                     + " left " + actual + "; expected " + expected);
+        }
+    }
+
+    private static void checkCliEndOfOptions() throws Exception {
+        Path directory = Files.createTempDirectory(Path.of("build"), "cli-flags-").toAbsolutePath();
+        List<String> names = List.of("--level", "--output", "--target-mb", "--help", "--");
+        try {
+            for (String name : names) Files.writeString(directory.resolve(name), "Literal input: " + name);
+            List<String> command = new ArrayList<>(List.of(
+                    Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-Djava.awt.headless=true", "-jar", Path.of("build/byteshrink.jar").toAbsolutePath().toString(),
+                    "--cli", "--output", "archive.zip", "--"));
+            command.addAll(names);
+            Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new AssertionError("CLI -- separator test did not finish");
+            }
+            String output;
+            try (var input = process.getInputStream()) {
+                output = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (process.exitValue() != 0) throw new AssertionError("CLI -- separator failed: " + output);
+            try (ZipFile zip = new ZipFile(directory.resolve("archive.zip").toFile())) {
+                if (zip.size() != names.size()) throw new AssertionError("CLI did not archive every literal input");
+                for (String name : names) {
+                    var entry = zip.getEntry(name);
+                    if (entry == null) throw new AssertionError("CLI omitted literal input: " + name);
+                    try (var input = zip.getInputStream(entry)) {
+                        String contents = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                        if (!contents.equals("Literal input: " + name)) {
+                            throw new AssertionError("CLI changed archived contents for: " + name);
+                        }
+                    }
+                    if (!Files.readString(directory.resolve(name)).equals("Literal input: " + name)) {
+                        throw new AssertionError("CLI changed the original input: " + name);
+                    }
+                }
+            }
+        } finally {
+            try (var paths = Files.walk(directory)) {
+                for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+            }
         }
     }
 

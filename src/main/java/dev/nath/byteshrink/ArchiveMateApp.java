@@ -43,7 +43,7 @@ import java.util.concurrent.CancellationException;
 
 /** Desktop entry point for ByteShrink. */
 public final class ArchiveMateApp {
-    private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] <file-or-folder>...";
+    private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] [--] <file-or-folder>...";
 
     private final JFrame frame = new JFrame("ByteShrink — File Compressor");
     private final DefaultListModel<Path> inputModel = new DefaultListModel<>();
@@ -462,6 +462,7 @@ public final class ArchiveMateApp {
                   --level <0-9>       Compression level; defaults to 9. Level 0 stores files.
                   --target-mb <size>  Try every level and keep the smallest verified ZIP.
                   --help, -h          Show this help without opening the desktop app.
+                  --                  Treat all remaining arguments as input paths.
 
                 Target sizes are best effort: lossless compression cannot guarantee a chosen size.
                 Original input files are left untouched.
@@ -485,12 +486,18 @@ public final class ArchiveMateApp {
         Long targetBytes = null;
         List<Path> inputs = new ArrayList<>();
         try {
+            boolean inputPathsOnly = false;
             for (int i = 1; i < args.length; i++) {
+                if (inputPathsOnly) {
+                    inputs.add(Path.of(args[i]));
+                    continue;
+                }
                 switch (args[i]) {
                     case "--output" -> output = Path.of(args[++i]);
                     case "--level" -> level = Integer.parseInt(args[++i]);
                     case "--target-mb" -> targetBytes = new BigDecimal(args[++i])
                             .multiply(BigDecimal.valueOf(1_000_000L)).setScale(0, RoundingMode.DOWN).longValueExact();
+                    case "--" -> inputPathsOnly = true;
                     default -> inputs.add(Path.of(args[i]));
                 }
             }
