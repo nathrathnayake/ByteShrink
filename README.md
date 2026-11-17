@@ -48,6 +48,8 @@ To display the options without opening the desktop app:
 
 `-h`, `--cli --help`, and `--cli -h` also display help and exit successfully.
 
+`--output`, `--level`, and `--target-mb` each require a following value. Missing or blank values produce an option-specific error and a nonzero exit status. Prefix output filenames that begin with `--` or equal `-h` with `./` so they are treated as values.
+
 ```bash
 ./run.sh --cli --output backup.zip --level 9 ./Documents ./notes.txt
 ```

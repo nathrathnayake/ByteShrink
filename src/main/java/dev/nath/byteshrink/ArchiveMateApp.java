@@ -472,12 +472,19 @@ public final class ArchiveMateApp {
                 """);
     }
 
+    private static String requireCliValue(String[] args, int index) {
+        if (index >= args.length || args[index].isBlank() || args[index].startsWith("--") || isHelp(args[index])) {
+            throw new IllegalArgumentException("Missing value for " + args[index - 1] + ".");
+        }
+        return args[index];
+    }
+
     private static void runCli(String[] args) {
         if (args.length > 1 && isHelp(args[1])) {
             printCliHelp();
             return;
         }
-        if (args.length < 4) {
+        if (args.length == 1) {
             System.err.println(CLI_USAGE);
             System.exit(2);
         }
@@ -493,9 +500,9 @@ public final class ArchiveMateApp {
                     continue;
                 }
                 switch (args[i]) {
-                    case "--output" -> output = Path.of(args[++i]);
-                    case "--level" -> level = Integer.parseInt(args[++i]);
-                    case "--target-mb" -> targetBytes = new BigDecimal(args[++i])
+                    case "--output" -> output = Path.of(requireCliValue(args, ++i));
+                    case "--level" -> level = Integer.parseInt(requireCliValue(args, ++i));
+                    case "--target-mb" -> targetBytes = new BigDecimal(requireCliValue(args, ++i))
                             .multiply(BigDecimal.valueOf(1_000_000L)).setScale(0, RoundingMode.DOWN).longValueExact();
                     case "--" -> inputPathsOnly = true;
                     default -> inputs.add(Path.of(args[i]));

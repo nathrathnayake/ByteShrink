@@ -36,6 +36,8 @@ public final class ArchiveMateAppSmokeTest {
         System.out.println("PASS: CLI help (long and short flags, with and without --cli)");
         checkCliEndOfOptions();
         System.out.println("PASS: CLI -- separator preserves option-like input filenames and contents");
+        checkCliMissingValues();
+        System.out.println("PASS: CLI missing option values produce specific errors without creating files");
     }
 
     private static void checkRemoval(int[] selection, List<Path> expected) {
@@ -62,7 +64,7 @@ public final class ArchiveMateAppSmokeTest {
             List<String> command = new ArrayList<>(List.of(
                     Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-Djava.awt.headless=true", "-jar", Path.of("build/byteshrink.jar").toAbsolutePath().toString(),
-                    "--cli", "--output", "archive.zip", "--"));
+                    "--cli", "--output", "archive.zip", "--level", "6", "--target-mb", "1", "--"));
             command.addAll(names);
             Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
@@ -87,6 +89,41 @@ public final class ArchiveMateAppSmokeTest {
                     }
                     if (!Files.readString(directory.resolve(name)).equals("Literal input: " + name)) {
                         throw new AssertionError("CLI changed the original input: " + name);
+                    }
+                }
+            }
+        } finally {
+            try (var paths = Files.walk(directory)) {
+                for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+            }
+        }
+    }
+
+    private static void checkCliMissingValues() throws Exception {
+        Path directory = Files.createTempDirectory(Path.of("build"), "cli-invalid-").toAbsolutePath();
+        List<List<String>> suffixes = List.of(List.of(), List.of(""), List.of("--"), List.of("--level", "9"));
+        try {
+            for (String option : List.of("--output", "--level", "--target-mb")) {
+                for (List<String> suffix : suffixes) {
+                    List<String> command = new ArrayList<>(List.of(
+                            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                            "-Djava.awt.headless=true", "-jar", Path.of("build/byteshrink.jar").toAbsolutePath().toString(),
+                            "--cli", option));
+                    command.addAll(suffix);
+                    Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                        process.destroyForcibly();
+                        throw new AssertionError("CLI missing-value check did not finish for " + option);
+                    }
+                    String output;
+                    try (var input = process.getInputStream()) {
+                        output = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                    }
+                    if (process.exitValue() == 0 || !output.contains("Missing value for " + option + ".")) {
+                        throw new AssertionError("CLI did not identify the incomplete option " + option + ": " + output);
+                    }
+                    try (var files = Files.list(directory)) {
+                        if (files.findAny().isPresent()) throw new AssertionError("Invalid CLI arguments created files");
                     }
                 }
             }
