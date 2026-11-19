@@ -70,6 +70,7 @@ public final class ArchiveServiceSmokeTest {
             }
 
             checkInputFileProtection(root);
+            checkNestedSymbolicLinks(root);
             checkOutputDirectoryPlanning(root);
             checkPlanningCancellation(root);
 
@@ -95,6 +96,46 @@ public final class ArchiveServiceSmokeTest {
                 });
             }
         }
+    }
+
+    private static void checkNestedSymbolicLinks(Path root) throws Exception {
+        Path source = Files.createDirectories(root.resolve("nested-link-source"));
+        Files.writeString(source.resolve("notes.txt"), "Keep the original source intact.");
+        Path targetFile = Files.writeString(root.resolve("nested-link-target.txt"), "Linked file contents.");
+        Path targetDirectory = Files.createDirectories(root.resolve("nested-link-target-folder"));
+        List<Path> targets = List.of(targetFile, targetDirectory, root.resolve("nested-link-missing-target"));
+        Path destination = root.resolve("nested-link-protected.zip");
+        byte[] original = "Keep the previous archive intact.".getBytes(StandardCharsets.UTF_8);
+        Files.write(destination, original);
+        for (int i = 0; i < targets.size(); i++) {
+            Path link = source.resolve("link-" + i);
+            try {
+                Files.createSymbolicLink(link, targets.get(i));
+            } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+                System.out.println("SKIP: nested symbolic-link checks (link creation unavailable: "
+                        + unavailable.getClass().getSimpleName() + ")");
+                return;
+            }
+            try {
+                boolean rejected = false;
+                try {
+                    new ArchiveService().compress(List.of(source), destination, 6, null,
+                            (step, steps, done, total, detail) -> {}, () -> false);
+                } catch (IOException expected) {
+                    rejected = true;
+                    check(expected.getMessage() != null && expected.getMessage().contains(link.toString()),
+                            "unsupported-input error did not identify the nested link");
+                }
+                check(rejected, "a nested symbolic link was silently omitted");
+                check(java.util.Arrays.equals(Files.readAllBytes(destination), original),
+                        "a rejected nested link modified the previous archive");
+            } finally {
+                Files.deleteIfExists(link);
+            }
+        }
+        check(Files.readString(source.resolve("notes.txt")).equals("Keep the original source intact."),
+                "a rejected nested link modified source contents");
+        System.out.println("PASS: nested file, directory, and broken symbolic links are rejected without replacing the destination");
     }
 
     private static void checkPlanningCancellation(Path root) throws Exception {

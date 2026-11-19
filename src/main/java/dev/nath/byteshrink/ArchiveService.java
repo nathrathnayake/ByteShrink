@@ -147,12 +147,12 @@ public final class ArchiveService {
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                         checkCancelled(cancelled);
                         if (file.toAbsolutePath().normalize().equals(destination)) return FileVisitResult.CONTINUE;
-                        if (attrs.isRegularFile()) {
-                            String relative = cleanRelative(root.relativize(file).toString().replace('\\', '/'));
-                            items.add(new Item(file, uniqueName + "/" + relative, false));
-                            bytes[0] += attrs.size();
-                            fileCount[0]++;
-                        }
+                        if (attrs.isSymbolicLink()) throw new IOException("Symbolic links are not supported: " + file);
+                        if (!attrs.isRegularFile()) throw new IOException("Unsupported input type: " + file);
+                        String relative = cleanRelative(root.relativize(file).toString().replace('\\', '/'));
+                        items.add(new Item(file, uniqueName + "/" + relative, false));
+                        bytes[0] += attrs.size();
+                        fileCount[0]++;
                         return FileVisitResult.CONTINUE;
                     }
                 });
