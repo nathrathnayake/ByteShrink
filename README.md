@@ -15,6 +15,7 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 - Reports unsupported inputs, including symbolic links inside selected folders, instead of silently skipping them.
 - Validates inputs before creating output folders, keeping newly created output folders out of the ZIP.
 - Includes a command-line mode for scripts and headless systems.
+- Inspects existing ZIPs, lists their contents, and verifies every entry's size and CRC without extracting or changing files.
 
 ## Important limit
 
@@ -69,6 +70,30 @@ Use `--` before input paths whose names look like options. Every argument after 
 ./run.sh --cli --output backup.zip -- --level --output
 ```
 
+## Inspect and verify an existing ZIP
+
+In the desktop app, click **Inspect ZIP…** and choose an archive. ByteShrink reads and verifies all entries, then opens a resizable, read-only table showing entry names, file/folder types, uncompressed sizes, compressed sizes, and CRC-32 checksums. Click column headings to sort the results, including sorting sizes numerically. The summary shows file and folder counts, total content size, and ZIP size.
+
+Inspection runs in the background with progress and **Cancel** support. It does not use the compression input list or output location. No contents are extracted, and the archive and original files stay unchanged on success, cancellation, or verification failure.
+
+For scripts or a headless system:
+
+```bash
+./run.sh --inspect backup.zip
+```
+
+Or inspect a built JAR without rebuilding:
+
+```bash
+java -jar build/byteshrink.jar --inspect backup.zip
+```
+
+`--inspect` is a standalone mode. Compression options such as `--output`, `--level`, and `--target-mb` do not apply to it. Successful inspection exits with status 0 and prints a summary followed by tab-separated columns: `TYPE`, `SIZE_BYTES`, `COMPRESSED_BYTES`, `CRC32`, and `ENTRY`. Errors exit with status 1; missing or extra inspection arguments exit with status 2. `--inspect --help` displays help.
+
+Verification reads every uncompressed byte and checks it against the ZIP's declared size and CRC, including empty entries and folder entries. Duplicate entry names, incomplete metadata, CRC/size mismatches, and archives changed during inspection are rejected. Control characters and backslashes in entry names are escaped for display; they are not renamed in the archive.
+
+Inspection supports ZIP formats readable by Java's standard ZIP library, including stored and Deflate entries. Encrypted ZIPs, split archives, and other unsupported compression methods cannot be verified. Full verification can take time for large archives; it streams contents through a fixed-size buffer. CRC-32 checks detect accidental corruption, not authenticity, and inspection does not repair an archive.
+
 ## Build and test
 
 ```bash
@@ -79,6 +104,7 @@ Use `--` before input paths whose names look like options. Every argument after 
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
 The built JAR is checked in a headless environment with all four help forms and input filenames that look like options.
+Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table, and success/error behaviour through the built JAR.
 
 ## ZIP level guide
 

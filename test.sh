@@ -11,3 +11,4 @@ else
 fi
 java -ea -cp build/classes:build/test-classes dev.nath.byteshrink.ArchiveServiceSmokeTest
 java -ea -Djava.awt.headless=true -cp build/classes:build/test-classes dev.nath.byteshrink.ArchiveMateAppSmokeTest
+java -ea -Djava.awt.headless=true -cp build/classes:build/test-classes dev.nath.byteshrink.ArchiveInspectorSmokeTest

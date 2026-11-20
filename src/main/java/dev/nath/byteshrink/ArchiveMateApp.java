@@ -5,6 +5,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -44,6 +45,7 @@ import java.util.concurrent.CancellationException;
 /** Desktop entry point for ByteShrink. */
 public final class ArchiveMateApp {
     private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] [--] <file-or-folder>...";
+    private static final String INSPECT_USAGE = "Usage: java -jar byteshrink.jar --inspect <archive.zip>";
 
     private final JFrame frame = new JFrame("ByteShrink — File Compressor");
     private final DefaultListModel<Path> inputModel = new DefaultListModel<>();
@@ -56,11 +58,13 @@ public final class ArchiveMateApp {
     private final JProgressBar progressBar = new JProgressBar(0, 100);
     private final JButton addFilesButton = new JButton("Add files");
     private final JButton addFolderButton = new JButton("Add folder");
+    private final JButton browseOutputButton = new JButton("Browse…");
+    private final JButton inspectButton = new JButton("Inspect ZIP…");
     private final JButton removeButton = new JButton("Remove selected");
     private final JButton clearButton = new JButton("Clear");
     private final JButton compressButton = new JButton("Create ZIP archive");
     private final JButton cancelButton = new JButton("Cancel");
-    private SwingWorker<ArchiveService.Result, ProgressUpdate> worker;
+    private SwingWorker<?, ProgressUpdate> worker;
 
     private record ProgressUpdate(int step, int steps, long done, long total, String detail) {}
 
@@ -72,6 +76,10 @@ public final class ArchiveMateApp {
     public static void main(String[] args) {
         if (args.length > 0 && isHelp(args[0])) {
             printCliHelp();
+            return;
+        }
+        if (args.length > 0 && "--inspect".equals(args[0])) {
+            runInspectCli(args);
             return;
         }
         if (args.length > 0 && "--cli".equals(args[0])) {
@@ -114,7 +122,7 @@ public final class ArchiveMateApp {
         JLabel title = new JLabel("ByteShrink");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 28f));
         title.setForeground(new Color(25, 43, 67));
-        JLabel subtitle = new JLabel("Compress files and folders into verified ZIP archives.");
+        JLabel subtitle = new JLabel("Create ZIP archives or inspect and verify their contents.");
         subtitle.setForeground(new Color(91, 105, 123));
         subtitle.setBorder(new EmptyBorder(4, 0, 0, 0));
         heading.add(title);
@@ -140,6 +148,7 @@ public final class ArchiveMateApp {
         compressButton.setForeground(Color.WHITE);
         compressButton.setBackground(new Color(31, 94, 176));
         compressButton.setFocusPainted(false);
+        buttons.add(inspectButton);
         buttons.add(cancelButton);
         buttons.add(compressButton);
         footer.add(statusLabel, BorderLayout.NORTH);
@@ -158,7 +167,7 @@ public final class ArchiveMateApp {
         inputList.setTransferHandler(new TransferHandler() {
             @Override
             public boolean canImport(TransferSupport support) {
-                return support.isDrop() && support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
+                return inputList.isEnabled() && support.isDrop() && support.isDataFlavorSupported(DataFlavor.javaFileListFlavor);
             }
 
             @Override
@@ -234,9 +243,8 @@ public final class ArchiveMateApp {
         outputField.setToolTipText("Choose where the new ZIP archive will be saved.");
         card.add(outputField, c);
         c.gridx = 2; c.weightx = 0; c.insets = new Insets(5, 0, 7, 0);
-        JButton browseOutput = new JButton("Browse…");
-        browseOutput.addActionListener(e -> chooseOutput());
-        card.add(browseOutput, c);
+        browseOutputButton.addActionListener(e -> chooseOutput());
+        card.add(browseOutputButton, c);
 
         c.insets = new Insets(5, 0, 7, 10);
         c.gridy = 2; c.gridx = 0;
@@ -293,6 +301,7 @@ public final class ArchiveMateApp {
         removeButton.addActionListener(e -> removeSelectedInputs(inputModel, inputList.getSelectedIndices()));
         clearButton.addActionListener(e -> inputModel.clear());
         compressButton.addActionListener(e -> startCompression());
+        inspectButton.addActionListener(e -> chooseInspection());
         cancelButton.addActionListener(e -> { if (worker != null) worker.cancel(true); });
     }
 
@@ -337,6 +346,64 @@ public final class ArchiveMateApp {
         }
     }
 
+    private void chooseInspection() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Inspect and verify a ZIP archive");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        chooser.setFileFilter(new FileNameExtensionFilter("ZIP archive (*.zip)", "zip"));
+        if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return;
+        Path archive = chooser.getSelectedFile().toPath();
+        setBusy(true);
+        statusLabel.setText("Reading and verifying ZIP contents…");
+        progressBar.setValue(0);
+        progressBar.setString("Starting inspection");
+        worker = new SwingWorker<ArchiveInspector.Result, ProgressUpdate>() {
+            @Override
+            protected ArchiveInspector.Result doInBackground() throws Exception {
+                return new ArchiveInspector().inspect(archive,
+                        (done, total, detail) -> publish(new ProgressUpdate(0, 1, done, total, detail)), this::isCancelled);
+            }
+            @Override
+            protected void process(List<ProgressUpdate> updates) {
+                if (!isCancelled()) displayProgress(updates);
+            }
+            @Override
+            protected void done() {
+                setBusy(false);
+                try {
+                    ArchiveInspector.Result result = get();
+                    progressBar.setValue(100);
+                    progressBar.setString("Verified");
+                    statusLabel.setText("ZIP contents verified. No files were extracted or changed.");
+                    JOptionPane pane = new JOptionPane(new ArchiveInspectionPanel(result), JOptionPane.PLAIN_MESSAGE);
+                    JDialog dialog = pane.createDialog(frame, "ZIP inspection");
+                    dialog.setResizable(true);
+                    dialog.setVisible(true);
+                    dialog.dispose();
+                } catch (CancellationException error) {
+                    progressBar.setString("Cancelled");
+                    statusLabel.setText("Inspection cancelled. The ZIP was not changed.");
+                } catch (Exception error) {
+                    progressBar.setString("Error");
+                    statusLabel.setText("ZIP inspection failed. The ZIP was not changed.");
+                    Throwable cause = error.getCause() == null ? error : error.getCause();
+                    showError(cause.getMessage() == null ? cause.toString() : cause.getMessage());
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private void displayProgress(List<ProgressUpdate> updates) {
+        ProgressUpdate update = updates.get(updates.size() - 1);
+        double fraction = update.total() == 0 ? 1 : Math.min(1, (double) update.done() / update.total());
+        int percent = (int) Math.round(((double) update.step() + fraction) * 100 / update.steps());
+        percent = Math.max(0, Math.min(100, percent));
+        progressBar.setValue(percent);
+        progressBar.setString(percent + "%");
+        statusLabel.setText(update.detail());
+    }
+
     private void startCompression() {
         if (inputModel.isEmpty()) { showError("Add at least one file or folder first."); return; }
         if (outputField.getText().isBlank()) { showError("Choose where to save the ZIP archive."); return; }
@@ -364,7 +431,7 @@ public final class ArchiveMateApp {
         progressBar.setValue(0);
         progressBar.setString("Starting");
 
-        worker = new SwingWorker<>() {
+        worker = new SwingWorker<ArchiveService.Result, ProgressUpdate>() {
             @Override
             protected ArchiveService.Result doInBackground() throws Exception {
                 return new ArchiveService().compress(inputs, destination, level, targetBytes,
@@ -373,13 +440,7 @@ public final class ArchiveMateApp {
             }
             @Override
             protected void process(List<ProgressUpdate> updates) {
-                ProgressUpdate update = updates.get(updates.size() - 1);
-                double fraction = update.total() == 0 ? 1 : Math.min(1, (double) update.done() / update.total());
-                int percent = (int) Math.round(((double) update.step() + fraction) * 100 / update.steps());
-                percent = Math.max(0, Math.min(100, percent));
-                progressBar.setValue(percent);
-                progressBar.setString(percent + "%");
-                statusLabel.setText(update.detail());
+                if (!isCancelled()) displayProgress(updates);
             }
             @Override
             protected void done() {
@@ -426,6 +487,9 @@ public final class ArchiveMateApp {
     }
 
     private void setBusy(boolean busy) {
+        inspectButton.setEnabled(!busy);
+        browseOutputButton.setEnabled(!busy);
+        inputList.setEnabled(!busy);
         addFilesButton.setEnabled(!busy);
         addFolderButton.setEnabled(!busy);
         removeButton.setEnabled(!busy);
@@ -455,6 +519,7 @@ public final class ArchiveMateApp {
 
     private static void printCliHelp() {
         System.out.println(CLI_USAGE);
+        System.out.println(INSPECT_USAGE);
         System.out.println("""
 
                 Options:
@@ -464,12 +529,44 @@ public final class ArchiveMateApp {
                   --help, -h          Show this help without opening the desktop app.
                   --                  Treat all remaining arguments as input paths.
 
+                Inspection mode:
+                  --inspect <path>     List and verify an existing ZIP without extracting or changing files.
+                                       This is a standalone mode; do not combine it with --cli options.
+
                 Target sizes are best effort: lossless compression cannot guarantee a chosen size.
                 Original input files are left untouched.
 
                 Example:
                   java -jar byteshrink.jar --cli --output backup.zip --level 9 ./Documents
                 """);
+    }
+
+    private static void runInspectCli(String[] args) {
+        if (args.length > 1 && isHelp(args[1])) { printCliHelp(); return; }
+        if (args.length != 2 || args[1].isBlank()) {
+            System.err.println(INSPECT_USAGE);
+            System.exit(2);
+            return;
+        }
+        try {
+            ArchiveInspector.Result result = new ArchiveInspector().inspect(Path.of(args[1]),
+                    (done, total, detail) -> {
+                        int percent = total == 0 ? 100 : (int) Math.min(100, Math.round(done * 100.0 / total));
+                        System.err.print("\r" + percent + "%  " + detail + "       ");
+                    }, () -> false);
+            System.err.println();
+            System.out.println("Verified ZIP: " + result.archive());
+            System.out.println("Files: " + result.fileCount() + " | Folders: " + result.directoryCount()
+                    + " | Contents: " + humanBytes(result.contentBytes()) + " | ZIP: " + humanBytes(result.archiveBytes()));
+            System.out.println("TYPE\tSIZE_BYTES\tCOMPRESSED_BYTES\tCRC32\tENTRY");
+            for (ArchiveInspector.Entry entry : result.entries()) {
+                System.out.println((entry.directory() ? "DIR" : "FILE") + "\t" + entry.size() + "\t"
+                        + entry.compressedSize() + "\t" + String.format("%08X", entry.crc32()) + "\t" + entry.displayName());
+            }
+        } catch (Exception error) {
+            System.err.println("\nByteShrink: " + error.getMessage());
+            System.exit(1);
+        }
     }
 
     private static String requireCliValue(String[] args, int index) {
