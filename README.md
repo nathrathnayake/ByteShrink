@@ -74,6 +74,8 @@ Use `--` before input paths whose names look like options. Every argument after 
 
 In the desktop app, click **Inspect ZIP…** and choose an archive. ByteShrink reads and verifies all entries, then opens a resizable, read-only table showing entry names, file/folder types, uncompressed sizes, compressed sizes, and CRC-32 checksums. Click column headings to sort the results, including sorting sizes numerically. The summary shows file and folder counts, total content size, and ZIP size.
 
+Use **Find entry** to filter the verified table by name without repeating inspection. Matching ignores case and treats punctuation literally; the visible-entry count updates as you type. **Clear** restores all entries and preserves the chosen sort order. Summary sizes and counts always describe the full archive.
+
 Inspection runs in the background with progress and **Cancel** support. It does not use the compression input list or output location. No contents are extracted, and the archive and original files stay unchanged on success, cancellation, or verification failure.
 
 For scripts or a headless system:

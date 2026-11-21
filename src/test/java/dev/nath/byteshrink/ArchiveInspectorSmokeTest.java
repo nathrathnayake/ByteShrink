@@ -1,7 +1,10 @@
 package dev.nath.byteshrink;
 
 import javax.swing.JComponent;
+import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -164,7 +167,8 @@ public final class ArchiveInspectorSmokeTest {
 
     private static void checkDesktopPanel(ArchiveInspector.Result result) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            JTable table = findTable(new ArchiveInspectionPanel(result));
+            ArchiveInspectionPanel panel = new ArchiveInspectionPanel(result);
+            JTable table = findComponent(panel, JTable.class);
             check(table != null && table.getRowCount() == result.entries().size(), "desktop table omitted entries");
             check(table.getColumnCount() == 5 && table.getColumnClass(2) == Long.class, "desktop table columns are wrong");
             for (int row = 0; row < table.getRowCount(); row++) {
@@ -182,18 +186,46 @@ public final class ArchiveInspectorSmokeTest {
                 check(renderer instanceof JComponent && Boolean.TRUE.equals(((JComponent) renderer).getClientProperty("html.disable")),
                         "entry names may be interpreted as HTML");
             }
+            JTextField filter = findComponent(panel, JTextField.class);
+            JButton clear = findComponent(panel, JButton.class);
+            check(filter != null && clear != null && !clear.isEnabled(), "inspection filter controls are missing or have wrong initial state");
+            var sortKeys = table.getRowSorter().getSortKeys();
+            check(hasLabel(panel, "9 of 9 entries"), "initial visible-entry count is wrong");
+            filter.setText("DOCS/");
+            check(table.getRowCount() == 2 && hasLabel(panel, "2 of 9 entries"), "folder filter did not ignore case");
+            filter.setText("CAFÉ");
+            check(table.getRowCount() == 1 && hasLabel(panel, "1 of 9 entries"), "Unicode name filtering failed");
+            filter.setText(".");
+            check(table.getRowCount() == 7, "filter text was treated as a regular expression");
+            filter.setText("[");
+            check(table.getRowCount() == 0 && hasLabel(panel, "0 of 9 entries"), "literal no-match filter failed");
+            filter.setText("\\u000A");
+            check(table.getRowCount() == 1, "escaped control-character names could not be filtered");
+            clear.doClick();
+            check(filter.getText().isEmpty() && table.getRowCount() == result.entries().size()
+                    && hasLabel(panel, "9 of 9 entries") && !clear.isEnabled(), "clearing the filter did not restore every entry");
+            check(table.getRowSorter().getSortKeys().equals(sortKeys), "filtering reset the selected sort order");
+            check(table.getModel().getRowCount() == result.entries().size(), "filtering changed the verified result data");
         });
     }
 
-    private static JTable findTable(Container container) {
+    private static <T extends Component> T findComponent(Container container, Class<T> type) {
         for (Component child : container.getComponents()) {
-            if (child instanceof JTable table) return table;
+            if (type.isInstance(child)) return type.cast(child);
             if (child instanceof Container nested) {
-                JTable table = findTable(nested);
-                if (table != null) return table;
+                T found = findComponent(nested, type);
+                if (found != null) return found;
             }
         }
         return null;
+    }
+
+    private static boolean hasLabel(Container container, String text) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof JLabel label && text.equals(label.getText())) return true;
+            if (child instanceof Container nested && hasLabel(nested, text)) return true;
+        }
+        return false;
     }
 
     private static void checkCli(Path root, Path archive, Path corrupt, Path empty) throws Exception {
