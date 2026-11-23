@@ -73,6 +73,7 @@ public final class ArchiveServiceSmokeTest {
             checkNestedSymbolicLinks(root);
             checkOutputDirectoryPlanning(root);
             checkPlanningCancellation(root);
+            checkChangingInputs(root);
 
             Path protectedArchive = root.resolve("protected.zip");
             byte[] keepExisting = "preserve existing destination".getBytes(StandardCharsets.UTF_8);
@@ -96,6 +97,77 @@ public final class ArchiveServiceSmokeTest {
                 });
             }
         }
+    }
+
+    private static void checkChangingInputs(Path root) throws Exception {
+        byte[] original = new byte[3 * 64 * 1024];
+        new Random(71).nextBytes(original);
+        byte[] previousArchive = "Keep the previous archive intact.".getBytes(StandardCharsets.UTF_8);
+        for (String phase : List.of("growing", "edited", "removed")) {
+            for (boolean existingDestination : List.of(false, true)) {
+                Path directory = Files.createDirectories(root.resolve("changing-" + phase + "-" + existingDestination));
+                Path inputFolder = Files.createDirectories(directory.resolve("inputs"));
+                Path source = Files.write(inputFolder.resolve("notes.bin"), original);
+                Path destination = directory.resolve("archive.zip");
+                if (existingDestination) Files.write(destination, previousArchive);
+                byte[] changedContents = java.util.Arrays.copyOf(original,
+                        original.length + (phase.equals("growing") ? 1 : 0));
+                changedContents[changedContents.length - 1] ^= 1;
+                var changedTime = java.nio.file.attribute.FileTime.fromMillis(
+                        Files.getLastModifiedTime(source).toMillis() + 10_000);
+                boolean[] changed = { false };
+                boolean refused = false;
+                try {
+                    // Use a nested input and all-level search for edits between candidates.
+                    new ArchiveService().compress(List.of(phase.equals("edited") ? inputFolder : source),
+                            destination, 6, phase.equals("edited") ? 1_000_000L : null,
+                            (step, steps, done, total, detail) -> {
+                                boolean trigger = switch (phase) {
+                                    case "growing" -> done > 0;
+                                    case "edited" -> step == 1 && detail.startsWith("Verified compression level ");
+                                    case "removed" -> step == steps && detail.startsWith("Verified compression level ");
+                                    default -> false;
+                                };
+                                if (!trigger || changed[0]) return;
+                                changed[0] = true;
+                                try {
+                                    if (phase.equals("growing")) {
+                                        Files.write(source, new byte[] { 1 }, java.nio.file.StandardOpenOption.APPEND);
+                                    } else if (phase.equals("edited")) {
+                                        Files.write(source, changedContents);
+                                        Files.setLastModifiedTime(source, changedTime);
+                                    } else {
+                                        Files.delete(source);
+                                    }
+                                } catch (IOException error) {
+                                    throw new java.io.UncheckedIOException(error);
+                                }
+                            }, () -> false);
+                } catch (IOException expected) {
+                    refused = true;
+                    check(expected.getMessage().contains(source.toString()), "changed-input error omitted the source path");
+                }
+                check(changed[0], "test did not change the input during " + phase);
+                check(refused, "compression accepted an input " + phase + " during compression");
+                if (existingDestination) {
+                    check(java.util.Arrays.equals(Files.readAllBytes(destination), previousArchive),
+                            "changed input replaced an existing destination");
+                } else {
+                    check(!Files.exists(destination), "changed input published a new destination");
+                }
+                if (phase.equals("removed")) {
+                    check(!Files.exists(source), "compression recreated a removed input");
+                } else {
+                    check(java.util.Arrays.equals(Files.readAllBytes(source), changedContents),
+                            "compression modified the externally changed input");
+                }
+                try (var children = Files.list(directory)) {
+                    check(children.noneMatch(path -> path.getFileName().toString().startsWith(".byteshrink-")),
+                            "changed-input failure left a temporary archive");
+                }
+            }
+        }
+        System.out.println("PASS: growing, edited, and removed inputs abort safely during writing, between levels, and before publication");
     }
 
     private static void checkNestedSymbolicLinks(Path root) throws Exception {

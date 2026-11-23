@@ -11,6 +11,7 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 - Verifies that every planned file and folder is present, no unexpected entries exist, and each file's size and CRC match before replacing the destination.
 - Keeps folder structure, supports empty folders, and avoids collisions when selected items have the same name.
 - Leaves the original files untouched. Cancellation is checked during folder scanning, writing, and verification; temporary archives are removed.
+- Checks for input-file changes during compression; detected changes preserve any previous destination and remove temporary archives.
 - Rejects output paths that refer to an input file through a different path, such as a symbolic-link folder alias.
 - Reports unsupported inputs, including symbolic links inside selected folders, instead of silently skipping them.
 - Validates inputs before creating output folders, keeping newly created output folders out of the ZIP.
@@ -22,6 +23,8 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 Lossless compression cannot guarantee that any input will fit an arbitrary target size. ZIP/Deflate only removes patterns it can represent more compactly. Photos, videos, PDFs, and existing archives are often already compressed, so the ZIP can be nearly the same size or slightly larger. When a target cannot be reached, ByteShrink keeps the smallest verified ZIP it found and says so.
 
 When a target size is set, ByteShrink writes and verifies candidates at levels 0 through 9. That can take longer and use temporary disk space for the best result found so far plus the candidate being tested. Without a target, it creates one archive at the selected level.
+
+ByteShrink checks each planned regular file's size, modification time, identity, and type before and after reading it, and checks all planned files again before replacing the destination. Detected changes or unavailable inputs cause the run to fail; pause edits to that file and retry. These checks also apply between compression levels in target-size mode. They do not create a filesystem snapshot: changes that preserve all checked metadata, newly added files, or changes after the final check may not be detected. Keep inputs stable while compression runs.
 
 ## Requirements
 
@@ -104,6 +107,7 @@ Inspection supports ZIP formats readable by Java's standard ZIP library, includi
 ```
 
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
+Changed-input checks grow a file during writing, edit a nested file between target-size candidates, and remove a file after ZIP verification; each case checks both new and existing destinations, source safety, and temporary-archive cleanup.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
 The built JAR is checked in a headless environment with all four help forms and input filenames that look like options.
 Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table, and success/error behaviour through the built JAR.

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -15,6 +16,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.zip.CRC32;
@@ -37,7 +39,7 @@ public final class ArchiveService {
         void onProgress(int step, int steps, long completedBytes, long totalBytes, String detail);
     }
 
-    private record Item(Path source, String entryName, boolean directory) {}
+    private record Item(Path source, String entryName, boolean directory, BasicFileAttributes attributes) {}
     private record Plan(List<Item> items, long bytes, int files, int directories) {}
     private record Candidate(Path path, long bytes, int level) {}
 
@@ -95,6 +97,10 @@ public final class ArchiveService {
                         "Verified compression level " + candidateLevel);
             }
 
+            for (Item item : plan.items()) {
+                checkCancelled(cancelled);
+                if (!item.directory()) checkSourceUnchanged(item);
+            }
             checkCancelled(cancelled);
             boolean targetMet = targetBytes == null || best.bytes() <= targetBytes;
             try {
@@ -139,7 +145,7 @@ public final class ArchiveService {
                         checkCancelled(cancelled);
                         String relative = root.relativize(directory).toString().replace('\\', '/');
                         String entry = relative.isEmpty() ? uniqueName + "/" : uniqueName + "/" + cleanRelative(relative) + "/";
-                        items.add(new Item(directory, entry, true));
+                        items.add(new Item(directory, entry, true, null));
                         directoryCount[0]++;
                         return FileVisitResult.CONTINUE;
                     }
@@ -150,18 +156,18 @@ public final class ArchiveService {
                         if (attrs.isSymbolicLink()) throw new IOException("Symbolic links are not supported: " + file);
                         if (!attrs.isRegularFile()) throw new IOException("Unsupported input type: " + file);
                         String relative = cleanRelative(root.relativize(file).toString().replace('\\', '/'));
-                        items.add(new Item(file, uniqueName + "/" + relative, false));
+                        items.add(new Item(file, uniqueName + "/" + relative, false, attrs));
                         bytes[0] += attrs.size();
                         fileCount[0]++;
                         return FileVisitResult.CONTINUE;
                     }
                 });
-            } else if (Files.isRegularFile(root)) {
-                items.add(new Item(root, uniqueName, false));
-                bytes[0] += Files.size(root);
-                fileCount[0]++;
             } else {
-                throw new IOException("Unsupported input type: " + root);
+                BasicFileAttributes attrs = Files.readAttributes(root, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (!attrs.isRegularFile()) throw new IOException("Unsupported input type: " + root);
+                items.add(new Item(root, uniqueName, false, attrs));
+                bytes[0] += attrs.size();
+                fileCount[0]++;
             }
         }
         return new Plan(List.copyOf(items), bytes[0], fileCount[0], directoryCount[0]);
@@ -207,19 +213,44 @@ public final class ArchiveService {
                 catch (IOException ignored) { /* Timestamps are optional metadata. */ }
                 zip.putNextEntry(entry);
                 if (!item.directory()) {
-                    try (InputStream input = new BufferedInputStream(Files.newInputStream(item.source()))) {
+                    checkSourceUnchanged(item);
+                    long sourceBytes = 0;
+                    try (InputStream input = new BufferedInputStream(Files.newInputStream(item.source(), LinkOption.NOFOLLOW_LINKS))) {
                         int read;
                         while ((read = input.read(buffer)) != -1) {
                             checkCancelled(cancelled);
+                            sourceBytes += read;
+                            if (sourceBytes > item.attributes().size()) {
+                                throw new IOException("Input changed during compression: " + item.source());
+                            }
                             zip.write(buffer, 0, read);
                             completed += read;
                             progress.update(Math.min(completed, totalBytes), item.source().getFileName().toString());
                         }
                     }
+                    if (sourceBytes != item.attributes().size()) {
+                        throw new IOException("Input changed during compression: " + item.source());
+                    }
+                    checkSourceUnchanged(item);
                 }
                 zip.closeEntry();
             }
             zip.finish();
+        }
+    }
+
+    private static void checkSourceUnchanged(Item item) throws IOException {
+        BasicFileAttributes current;
+        try {
+            current = Files.readAttributes(item.source(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException error) {
+            throw new IOException("Input became unavailable during compression: " + item.source(), error);
+        }
+        BasicFileAttributes planned = item.attributes();
+        if (!current.isRegularFile() || current.size() != planned.size()
+                || !current.lastModifiedTime().equals(planned.lastModifiedTime())
+                || !Objects.equals(current.fileKey(), planned.fileKey())) {
+            throw new IOException("Input changed during compression: " + item.source() + ". Please retry.");
         }
     }
 
