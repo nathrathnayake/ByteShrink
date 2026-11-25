@@ -33,11 +33,15 @@ public final class ArchiveMateAppSmokeTest {
         checkCliHelp("-h");
         checkCliHelp("--cli", "--help");
         checkCliHelp("--cli", "-h");
-        System.out.println("PASS: CLI help (long and short flags, with and without --cli)");
+        checkCliHelp("--cli", "--level", "6", "--help");
+        checkCliHelp("--cli", "--level", "6", "-h");
+        System.out.println("PASS: CLI help (long and short flags, with and without --cli, and after options)");
         checkCliEndOfOptions();
         System.out.println("PASS: CLI -- separator preserves option-like input filenames and contents");
         checkCliMissingValues();
         System.out.println("PASS: CLI missing option values produce specific errors without creating files");
+        checkCliUnknownOptions();
+        System.out.println("PASS: CLI rejects unknown options without changing inputs, existing archives, or output folders");
     }
 
     private static void checkRemoval(int[] selection, List<Path> expected) {
@@ -58,7 +62,7 @@ public final class ArchiveMateAppSmokeTest {
 
     private static void checkCliEndOfOptions() throws Exception {
         Path directory = Files.createTempDirectory(Path.of("build"), "cli-flags-").toAbsolutePath();
-        List<String> names = List.of("--level", "--output", "--target-mb", "--help", "--");
+        List<String> names = List.of("--level", "--output", "--target-mb", "--help", "--", "-h", "-x", "-", "--level=6");
         try {
             for (String name : names) Files.writeString(directory.resolve(name), "Literal input: " + name);
             List<String> command = new ArrayList<>(List.of(
@@ -124,6 +128,60 @@ public final class ArchiveMateAppSmokeTest {
                     }
                     try (var files = Files.list(directory)) {
                         if (files.findAny().isPresent()) throw new AssertionError("Invalid CLI arguments created files");
+                    }
+                }
+            }
+        } finally {
+            try (var paths = Files.walk(directory)) {
+                for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
+            }
+        }
+    }
+
+    private static void checkCliUnknownOptions() throws Exception {
+        Path directory = Files.createTempDirectory(Path.of("build"), "cli-unknown-").toAbsolutePath();
+        List<String> options = List.of("--levle", "--level=6", "-x", "-", "--inspect");
+        String originalInput = "Keep this source data intact.";
+        String originalArchive = "Keep the previous destination intact.";
+        try {
+            Files.writeString(directory.resolve("notes.txt"), originalInput);
+            Files.writeString(directory.resolve("existing.zip"), originalArchive);
+            // Existing option-like files must not turn a typo into a successful compression.
+            for (String option : options) Files.writeString(directory.resolve(option), "Literal input: " + option);
+            for (String option : options) {
+                for (String destination : List.of("existing.zip", "new-output/nested/archive.zip")) {
+                    List<String> command = List.of(
+                            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                            "-Djava.awt.headless=true", "-jar", Path.of("build/byteshrink.jar").toAbsolutePath().toString(),
+                            "--cli", "--output", destination, "--level", "6", "notes.txt", option);
+                    Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                        process.destroyForcibly();
+                        throw new AssertionError("CLI unknown-option check did not finish for " + option);
+                    }
+                    String output;
+                    try (var input = process.getInputStream()) {
+                        output = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+                    }
+                    if (process.exitValue() == 0 || !output.contains("Unknown option: " + option + ".")
+                            || !output.contains("Use -- before input paths")) {
+                        throw new AssertionError("CLI did not explain the unknown option " + option + ": " + output);
+                    }
+                    if (!Files.readString(directory.resolve("existing.zip")).equals(originalArchive)) {
+                        throw new AssertionError("Unknown CLI option replaced the previous destination");
+                    }
+                    if (!Files.readString(directory.resolve("notes.txt")).equals(originalInput)) {
+                        throw new AssertionError("Unknown CLI option changed source contents");
+                    }
+                    for (String name : options) {
+                        if (!Files.readString(directory.resolve(name)).equals("Literal input: " + name)) {
+                            throw new AssertionError("Unknown CLI option changed a literal input: " + name);
+                        }
+                    }
+                    try (var files = Files.list(directory)) {
+                        if (files.count() != options.size() + 2) {
+                            throw new AssertionError("Unknown CLI option created files or output folders");
+                        }
                     }
                 }
             }

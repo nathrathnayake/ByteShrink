@@ -51,7 +51,7 @@ To display the options without opening the desktop app:
 ./run.sh --help
 ```
 
-`-h`, `--cli --help`, and `--cli -h` also display help and exit successfully.
+`-h`, `--cli --help`, and `--cli -h` also display help and exit successfully. In `--cli` mode, help flags can also appear after other options, before `--`.
 
 `--output`, `--level`, and `--target-mb` each require a following value. Missing or blank values produce an option-specific error and a nonzero exit status. Prefix output filenames that begin with `--` or equal `-h` with `./` so they are treated as values.
 
@@ -67,7 +67,7 @@ To try to keep the archive under 25 MB:
 
 `--target-mb` runs all ten ZIP levels and chooses the smallest verified output. A target value is best-effort and does not discard information.
 
-Use `--` before input paths whose names look like options. Every argument after it is treated as a file or folder path:
+Unknown options such as `--levle` or `-x` produce an error naming the option and a nonzero exit status before creating or replacing an archive or creating output folders. For literal input filenames beginning with `-`, use a `./` prefix or `--` before the input paths. Every argument after `--` is treated as a file or folder path:
 
 ```bash
 ./run.sh --cli --output backup.zip -- --level --output
@@ -109,7 +109,7 @@ Inspection supports ZIP formats readable by Java's standard ZIP library, includi
 The integration check compresses text and random binary data, checks that the entries round-trip byte for byte, and checks that an impossible target is reported accurately.
 Changed-input checks grow a file during writing, edit a nested file between target-size candidates, and remove a file after ZIP verification; each case checks both new and existing destinations, source safety, and temporary-archive cleanup.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
-The built JAR is checked in a headless environment with all four help forms and input filenames that look like options.
+The built JAR is checked in a headless environment with help flags, missing option values, unknown options, preservation of existing outputs on argument errors, and input filenames that look like options.
 Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table, and success/error behaviour through the built JAR.
 
 ## ZIP level guide

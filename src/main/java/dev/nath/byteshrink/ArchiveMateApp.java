@@ -535,6 +535,7 @@ public final class ArchiveMateApp {
 
                 Target sizes are best effort: lossless compression cannot guarantee a chosen size.
                 Original input files are left untouched.
+                Unknown options are errors. Use -- before input paths that begin with -.
 
                 Example:
                   java -jar byteshrink.jar --cli --output backup.zip --level 9 ./Documents
@@ -601,8 +602,15 @@ public final class ArchiveMateApp {
                     case "--level" -> level = Integer.parseInt(requireCliValue(args, ++i));
                     case "--target-mb" -> targetBytes = new BigDecimal(requireCliValue(args, ++i))
                             .multiply(BigDecimal.valueOf(1_000_000L)).setScale(0, RoundingMode.DOWN).longValueExact();
+                    case "--help", "-h" -> { printCliHelp(); return; }
                     case "--" -> inputPathsOnly = true;
-                    default -> inputs.add(Path.of(args[i]));
+                    default -> {
+                        if (args[i].startsWith("-")) {
+                            throw new IllegalArgumentException("Unknown option: " + args[i]
+                                    + ". Use -- before input paths that begin with '-'.");
+                        }
+                        inputs.add(Path.of(args[i]));
+                    }
                 }
             }
             if (output == null) throw new IllegalArgumentException("Specify --output archive.zip.");
