@@ -3,6 +3,7 @@ package dev.nath.byteshrink;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -67,25 +68,41 @@ final class ArchiveInspectionPanel extends JPanel {
         filterLabel.setLabelFor(filterField);
         JLabel matches = new JLabel();
         JButton clearFilter = new JButton("Clear");
+        JComboBox<String> typeFilter = new JComboBox<>(new String[] { "All entries", "Files only", "Folders only" });
+        typeFilter.setToolTipText("Filter verified entries by file or folder type.");
+        JLabel typeLabel = new JLabel("Show");
+        typeLabel.setLabelFor(typeFilter);
         Runnable applyFilter = () -> {
             String query = filterField.getText().toLowerCase(Locale.ROOT);
-            sorter.setRowFilter(query.isEmpty() ? null : new RowFilter<DefaultTableModel, Integer>() {
+            String requiredType = switch (typeFilter.getSelectedIndex()) {
+                case 1 -> "File";
+                case 2 -> "Folder";
+                default -> null;
+            };
+            sorter.setRowFilter(query.isEmpty() && requiredType == null ? null : new RowFilter<DefaultTableModel, Integer>() {
                 @Override
                 public boolean include(RowFilter.Entry<? extends DefaultTableModel, ? extends Integer> entry) {
-                    return entry.getStringValue(0).toLowerCase(Locale.ROOT).contains(query);
+                    return (requiredType == null || requiredType.equals(entry.getStringValue(1)))
+                            && entry.getStringValue(0).toLowerCase(Locale.ROOT).contains(query);
                 }
             });
             matches.setText(table.getRowCount() + " of " + model.getRowCount() + " entries");
-            clearFilter.setEnabled(!query.isEmpty());
+            clearFilter.setEnabled(!query.isEmpty() || requiredType != null);
         };
         filterField.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent event) { applyFilter.run(); }
             @Override public void removeUpdate(DocumentEvent event) { applyFilter.run(); }
             @Override public void changedUpdate(DocumentEvent event) { applyFilter.run(); }
         });
-        clearFilter.addActionListener(event -> filterField.setText(""));
+        typeFilter.addActionListener(event -> applyFilter.run());
+        clearFilter.addActionListener(event -> {
+            filterField.setText("");
+            typeFilter.setSelectedIndex(0);
+        });
         applyFilter.run();
         JPanel filterActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        filterActions.add(typeLabel);
+        filterActions.add(typeFilter);
         filterActions.add(matches);
         filterActions.add(clearFilter);
         JPanel filterBar = new JPanel(new BorderLayout(8, 0));

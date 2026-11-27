@@ -2,6 +2,7 @@ package dev.nath.byteshrink;
 
 import javax.swing.JComponent;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JTable;
 import javax.swing.JTextField;
@@ -97,7 +98,7 @@ public final class ArchiveInspectorSmokeTest {
             checkCancellation(external, result.contentBytes(), original);
             checkChangedArchive(external);
             checkCli(root, external, corrupt, empty);
-            System.out.println("PASS: ZIP inspection (external and ByteShrink ZIPs, Unicode, empty entries, CRC corruption, duplicate names, cancellation, changed archives, read-only UI, and packaged CLI)");
+            System.out.println("PASS: ZIP inspection (external and ByteShrink ZIPs, Unicode, empty entries, CRC corruption, duplicate names, cancellation, changed archives, read-only UI with name/type filtering, and packaged CLI)");
         } finally {
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
@@ -187,8 +188,10 @@ public final class ArchiveInspectorSmokeTest {
                         "entry names may be interpreted as HTML");
             }
             JTextField filter = findComponent(panel, JTextField.class);
-            JButton clear = findComponent(panel, JButton.class);
+            JButton clear = findButton(panel, "Clear");
+            JComboBox<?> type = findComponent(panel, JComboBox.class);
             check(filter != null && clear != null && !clear.isEnabled(), "inspection filter controls are missing or have wrong initial state");
+            check(type != null && "All entries".equals(type.getSelectedItem()), "entry-type filter did not default to all entries");
             var sortKeys = table.getRowSorter().getSortKeys();
             check(hasLabel(panel, "9 of 9 entries"), "initial visible-entry count is wrong");
             filter.setText("DOCS/");
@@ -201,9 +204,36 @@ public final class ArchiveInspectorSmokeTest {
             check(table.getRowCount() == 0 && hasLabel(panel, "0 of 9 entries"), "literal no-match filter failed");
             filter.setText("\\u000A");
             check(table.getRowCount() == 1, "escaped control-character names could not be filtered");
+            filter.setText("");
+            type.setSelectedItem("Files only");
+            check(table.getRowCount() == result.fileCount() && hasLabel(panel, "7 of 9 entries") && clear.isEnabled(),
+                    "files-only filtering or its visible-entry count is wrong");
+            for (int row = 0; row < table.getRowCount(); row++) {
+                check(table.getValueAt(row, 1).equals("File"), "files-only filtering included a folder");
+            }
+            filter.setText("DOCS/");
+            check(table.getRowCount() == 1 && table.getValueAt(0, 0).equals("docs/notes.txt")
+                    && hasLabel(panel, "1 of 9 entries"), "name and file filters were not combined");
+            type.setSelectedItem("Folders only");
+            check(table.getRowCount() == 1 && table.getValueAt(0, 0).equals("docs/"),
+                    "changing type did not preserve the active name filter");
+            filter.setText("");
+            check(table.getRowCount() == result.directoryCount() && hasLabel(panel, "2 of 9 entries"),
+                    "folders-only filtering or its visible-entry count is wrong");
+            for (int row = 0; row < table.getRowCount(); row++) {
+                check(table.getValueAt(row, 1).equals("Folder"), "folders-only filtering included a file");
+            }
+            filter.setText(".txt");
+            check(table.getRowCount() == 0 && hasLabel(panel, "0 of 9 entries"), "combined no-match filter failed");
             clear.doClick();
             check(filter.getText().isEmpty() && table.getRowCount() == result.entries().size()
-                    && hasLabel(panel, "9 of 9 entries") && !clear.isEnabled(), "clearing the filter did not restore every entry");
+                    && "All entries".equals(type.getSelectedItem()) && hasLabel(panel, "9 of 9 entries")
+                    && !clear.isEnabled(), "clearing both filters did not restore every entry");
+            type.setSelectedItem("Files only");
+            check(clear.isEnabled(), "a type-only filter did not enable Clear");
+            clear.doClick();
+            check(table.getRowCount() == result.entries().size() && "All entries".equals(type.getSelectedItem())
+                    && !clear.isEnabled(), "Clear did not reset a type-only filter");
             check(table.getRowSorter().getSortKeys().equals(sortKeys), "filtering reset the selected sort order");
             check(table.getModel().getRowCount() == result.entries().size(), "filtering changed the verified result data");
         });
@@ -214,6 +244,17 @@ public final class ArchiveInspectorSmokeTest {
             if (type.isInstance(child)) return type.cast(child);
             if (child instanceof Container nested) {
                 T found = findComponent(nested, type);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static JButton findButton(Container container, String text) {
+        for (Component child : container.getComponents()) {
+            if (child instanceof JButton button && text.equals(button.getText())) return button;
+            if (child instanceof Container nested) {
+                JButton found = findButton(nested, text);
                 if (found != null) return found;
             }
         }

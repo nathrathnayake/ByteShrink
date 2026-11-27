@@ -77,7 +77,7 @@ Unknown options such as `--levle` or `-x` produce an error naming the option and
 
 In the desktop app, click **Inspect ZIP…** and choose an archive. ByteShrink reads and verifies all entries, then opens a resizable, read-only table showing entry names, file/folder types, uncompressed sizes, compressed sizes, and CRC-32 checksums. Click column headings to sort the results, including sorting sizes numerically. The summary shows file and folder counts, total content size, and ZIP size.
 
-Use **Find entry** to filter the verified table by name without repeating inspection. Matching ignores case and treats punctuation literally; the visible-entry count updates as you type. **Clear** restores all entries and preserves the chosen sort order. Summary sizes and counts always describe the full archive.
+Use **Find entry** to filter the verified table by name without repeating inspection. Matching ignores case and treats punctuation literally. The **Show** selector switches between **All entries**, **Files only**, and **Folders only**, and combines with the name search: for example, search for `docs/` and choose **Files only** to show matching files without folder rows. The visible-entry count updates with either filter. **Clear** resets both filters, restores all entries, and preserves the chosen sort order. Summary sizes and counts always describe the full archive.
 
 Inspection runs in the background with progress and **Cancel** support. It does not use the compression input list or output location. No contents are extracted, and the archive and original files stay unchanged on success, cancellation, or verification failure.
 
@@ -110,7 +110,7 @@ The integration check compresses text and random binary data, checks that the en
 Changed-input checks grow a file during writing, edit a nested file between target-size candidates, and remove a file after ZIP verification; each case checks both new and existing destinations, source safety, and temporary-archive cleanup.
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
 The built JAR is checked in a headless environment with help flags, missing option values, unknown options, preservation of existing outputs on argument errors, and input filenames that look like options.
-Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table, and success/error behaviour through the built JAR.
+Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table with combined name/type filters and reset behaviour, and success/error behaviour through the built JAR.
 
 ## ZIP level guide
 
