@@ -22,7 +22,7 @@ public final class ArchiveInspector {
 
     public record Entry(String name, boolean directory, long size, long compressedSize, long crc32) {
         /** Escapes control characters and backslashes for unambiguous display. */
-        public String displayName() { return printableName(name); }
+        public String displayName() { return ArchiveText.escape(name); }
     }
 
     public record Result(Path archive, long archiveBytes, long contentBytes, int fileCount,
@@ -53,9 +53,9 @@ public final class ArchiveInspector {
             while (entries.hasMoreElements()) {
                 checkCancelled(cancelled);
                 ZipEntry entry = entries.nextElement();
-                if (!names.add(entry.getName())) throw new IOException("Duplicate ZIP entry: " + printableName(entry.getName()));
+                if (!names.add(entry.getName())) throw new IOException("Duplicate ZIP entry: " + ArchiveText.escape(entry.getName()));
                 if (entry.getSize() < 0 || entry.getCompressedSize() < 0 || entry.getCrc() < 0) {
-                    throw new IOException("ZIP entry has incomplete metadata: " + printableName(entry.getName()));
+                    throw new IOException("ZIP entry has incomplete metadata: " + ArchiveText.escape(entry.getName()));
                 }
                 total = addSize(total, entry.getSize());
                 planned.add(entry);
@@ -64,7 +64,7 @@ public final class ArchiveInspector {
             byte[] buffer = new byte[BUFFER_SIZE];
             for (ZipEntry entry : planned) {
                 checkCancelled(cancelled);
-                String detail = printableName(entry.getName());
+                String detail = ArchiveText.escape(entry.getName());
                 CRC32 crc = new CRC32();
                 long size = 0;
                 try (var input = new BufferedInputStream(zip.getInputStream(entry))) {
@@ -98,16 +98,6 @@ public final class ArchiveInspector {
         notifyProgress(progress, completed, total, "ZIP contents verified.");
         checkCancelled(cancelled);
         return new Result(source, before.size(), completed, files, directories, verified);
-    }
-
-    private static String printableName(String name) {
-        StringBuilder result = new StringBuilder();
-        for (char c : name.toCharArray()) {
-            if (c == '\\') result.append("\\\\");
-            else if (Character.isISOControl(c)) result.append(String.format("\\u%04X", (int) c));
-            else result.append(c);
-        }
-        return result.toString();
     }
 
     private static long addSize(long total, long amount) throws IOException {

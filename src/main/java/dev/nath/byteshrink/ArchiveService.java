@@ -34,6 +34,17 @@ public final class ArchiveService {
         public double percentSaved() { return inputBytes == 0 ? 0 : (inputBytes - archiveBytes) * 100.0 / inputBytes; }
     }
 
+    /** One planned ZIP entry; directory sizes are zero and entryName is the actual ZIP name. */
+    public record PlannedEntry(Path source, String entryName, boolean directory, long size) {
+        public String displayName() { return ArchiveText.escape(entryName); }
+    }
+
+    /** A metadata-only preview, never reused as an instruction to write an archive. */
+    public record Preview(Path archive, long inputBytes, int fileCount, int directoryCount,
+                          int level, Long targetBytes, List<PlannedEntry> entries) {
+        public Preview { entries = List.copyOf(entries); }
+    }
+
     @FunctionalInterface
     public interface ProgressListener {
         void onProgress(int step, int steps, long completedBytes, long totalBytes, String detail);
@@ -41,13 +52,34 @@ public final class ArchiveService {
 
     private record Item(Path source, String entryName, boolean directory, BasicFileAttributes attributes) {}
     private record Plan(List<Item> items, long bytes, int files, int directories) {}
+    private record PreparedPlan(Path destination, Plan plan) {}
     private record Candidate(Path path, long bytes, int level) {}
 
-    public Result compress(List<Path> inputs, Path output, int level, Long targetBytes,
-                           ProgressListener progress, BooleanSupplier cancelled) throws IOException {
+    /**
+     * Plans using the same validation as compression, without reading file contents or writing files.
+     * This does not test destination writability; compress always builds a fresh plan.
+     */
+    public Preview preview(List<Path> inputs, Path output, int level, Long targetBytes,
+                           BooleanSupplier cancelled) throws IOException {
+        PreparedPlan prepared = prepare(inputs, output, level, targetBytes, cancelled);
+        Plan plan = prepared.plan();
+        List<PlannedEntry> entries = new ArrayList<>();
+        for (Item item : plan.items()) {
+            checkCancelled(cancelled);
+            entries.add(new PlannedEntry(item.source(), item.entryName(), item.directory(),
+                    item.directory() ? 0 : item.attributes().size()));
+        }
+        checkCancelled(cancelled);
+        return new Preview(prepared.destination(), plan.bytes(), plan.files(), plan.directories(),
+                level, targetBytes, entries);
+    }
+
+    private PreparedPlan prepare(List<Path> inputs, Path output, int level, Long targetBytes,
+                                 BooleanSupplier cancelled) throws IOException {
         if (level < 0 || level > 9) throw new IllegalArgumentException("Compression level must be between 0 and 9.");
         if (targetBytes != null && targetBytes < 1) throw new IllegalArgumentException("The target size must be greater than zero.");
         if (inputs == null || inputs.isEmpty()) throw new IllegalArgumentException("Add at least one file or folder.");
+        if (output == null) throw new IllegalArgumentException("Choose a valid output location.");
         checkCancelled(cancelled);
 
         Path destination = output.toAbsolutePath().normalize();
@@ -58,14 +90,28 @@ public final class ArchiveService {
         Plan plan = makePlan(inputs, destination, cancelled);
         if (plan.items().isEmpty()) throw new IllegalArgumentException("The selected folders contain no regular files or folders to archive.");
         boolean destinationExists = Files.exists(destination);
+        Set<String> entryNames = new HashSet<>();
         for (Item item : plan.items()) {
             checkCancelled(cancelled);
+            if (!entryNames.add(item.entryName())) {
+                throw new IOException("Archive plan contains duplicate entry: " + item.entryName());
+            }
             if (!item.directory() && (item.source().equals(destination)
                     || (destinationExists && Files.isSameFile(item.source(), destination)))) {
                 throw new IllegalArgumentException("The archive cannot overwrite one of its input files.");
             }
         }
 
+        checkCancelled(cancelled);
+        return new PreparedPlan(destination, plan);
+    }
+
+    public Result compress(List<Path> inputs, Path output, int level, Long targetBytes,
+                           ProgressListener progress, BooleanSupplier cancelled) throws IOException {
+        PreparedPlan prepared = prepare(inputs, output, level, targetBytes, cancelled);
+        Path destination = prepared.destination();
+        Path parent = destination.getParent();
+        Plan plan = prepared.plan();
         checkCancelled(cancelled);
         Files.createDirectories(parent);
         List<Path> temporaryFiles = new ArrayList<>();

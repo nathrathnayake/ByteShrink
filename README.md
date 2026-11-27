@@ -15,6 +15,7 @@ ByteShrink is a small Java 17 desktop app and command-line tool for making **los
 - Rejects output paths that refer to an input file through a different path, such as a symbolic-link folder alias.
 - Reports unsupported inputs, including symbolic links inside selected folders, instead of silently skipping them.
 - Validates inputs before creating output folders, keeping newly created output folders out of the ZIP.
+- Previews the planned ZIP entries, source paths, and uncompressed sizes without creating or replacing files.
 - Includes a command-line mode for scripts and headless systems.
 - Inspects existing ZIPs, lists their contents, and verifies every entry's size and CRC without extracting or changing files.
 
@@ -73,6 +74,28 @@ Unknown options such as `--levle` or `-x` produce an error naming the option and
 ./run.sh --cli --output backup.zip -- --level --output
 ```
 
+## Preview before creating a ZIP
+
+In the desktop app, add inputs, choose an output path and compression settings, then click **Preview ZIP…**. Scanning runs in the background with **Cancel** support. The resizable, read-only preview lists each planned ZIP entry, its file/folder type, its uncompressed size, and its absolute source path. Click column headings to sort, including sorting sizes numerically. The summary shows file/folder counts, total uncompressed bytes, and the selected level or target-size search mode.
+
+Preview uses the same planning and input-file protection as compression: overlapping selections are deduplicated, duplicate root names receive the same suffixes, empty folders are included, unsupported links and duplicate ZIP entry names are rejected, and the chosen output is omitted when it is inside a selected folder. No ZIPs, temporary archives, or output folders are created, and an existing destination stays untouched. Preview does not ask to replace an existing file. **Create ZIP archive** performs the normal replacement confirmation and compression afterwards.
+
+For scripts and headless systems, add `--dry-run` to the compression command:
+
+```bash
+./run.sh --cli --dry-run --output backup.zip --level 9 ./Documents ./notes.txt
+```
+
+To preview a target-size search:
+
+```bash
+./run.sh --cli --dry-run --output upload.zip --target-mb 25 ./project-folder
+```
+
+`--output` is required even for a dry run so ByteShrink can validate the destination and exclude it from selected folders. Successful previews exit with status 0 and print a summary followed by tab-separated columns: `TYPE`, `SIZE_BYTES`, `ENTRY`, and `SOURCE`. Validation errors exit with status 1. Folder sizes are zero; the total counts file content bytes. Control characters and backslashes are escaped for display. Use `--` before literal input filenames such as `--dry-run`, as with normal compression.
+
+Remove `--dry-run` from the command to create the archive. Preview reads metadata only: it does not read or verify file contents, estimate compressed size, determine whether a target can be met, or test destination writability. It is a point-in-time view, not a filesystem snapshot. Compression always scans and validates inputs again, so later changes may alter the plan or cause a safe failure. The resulting ZIP still undergoes full entry, size, and CRC verification before replacing the destination.
+
 ## Inspect and verify an existing ZIP
 
 In the desktop app, click **Inspect ZIP…** and choose an archive. ByteShrink reads and verifies all entries, then opens a resizable, read-only table showing entry names, file/folder types, uncompressed sizes, compressed sizes, and CRC-32 checksums. Click column headings to sort the results, including sorting sizes numerically. The summary shows file and folder counts, total content size, and ZIP size.
@@ -111,6 +134,7 @@ Changed-input checks grow a file during writing, edit a nested file between targ
 Headless Swing checks also cover removing single, adjacent, separated, and all input selections, plus removing an empty selection.
 The built JAR is checked in a headless environment with help flags, missing option values, unknown options, preservation of existing outputs on argument errors, and input filenames that look like options.
 Inspector checks cover ZIPs created independently and by ByteShrink, Unicode/control-character names, empty ZIPs/files/folders, corrupt payloads, duplicate entries, cancellation, changed archives, no extraction or archive modification, the desktop table with combined name/type filters and reset behaviour, and success/error behaviour through the built JAR.
+Preview checks compare file hashes, modification times, and folder trees before and after successful, invalid, and cancelled previews. They cover duplicate/overlapping roots, source-to-entry mapping, symbolic-link aliases, unsupported nested links, preflight name collisions, read-only desktop sorting, Unicode/control-character display, the packaged `--dry-run` CLI, byte-for-byte agreement with the actual ZIP, and fresh scans after inputs change.
 
 ## ZIP level guide
 

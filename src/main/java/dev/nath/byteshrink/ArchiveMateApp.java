@@ -44,7 +44,7 @@ import java.util.concurrent.CancellationException;
 
 /** Desktop entry point for ByteShrink. */
 public final class ArchiveMateApp {
-    private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] [--] <file-or-folder>...";
+    private static final String CLI_USAGE = "Usage: java -jar byteshrink.jar --cli --output archive.zip [--level 0-9] [--target-mb size] [--dry-run] [--] <file-or-folder>...";
     private static final String INSPECT_USAGE = "Usage: java -jar byteshrink.jar --inspect <archive.zip>";
 
     private final JFrame frame = new JFrame("ByteShrink — File Compressor");
@@ -60,6 +60,7 @@ public final class ArchiveMateApp {
     private final JButton addFolderButton = new JButton("Add folder");
     private final JButton browseOutputButton = new JButton("Browse…");
     private final JButton inspectButton = new JButton("Inspect ZIP…");
+    private final JButton previewButton = new JButton("Preview ZIP…");
     private final JButton removeButton = new JButton("Remove selected");
     private final JButton clearButton = new JButton("Clear");
     private final JButton compressButton = new JButton("Create ZIP archive");
@@ -67,6 +68,7 @@ public final class ArchiveMateApp {
     private SwingWorker<?, ProgressUpdate> worker;
 
     private record ProgressUpdate(int step, int steps, long done, long total, String detail) {}
+    private record CompressionRequest(List<Path> inputs, Path destination, int level, Long targetBytes) {}
 
     private ArchiveMateApp() {
         buildWindow();
@@ -149,6 +151,8 @@ public final class ArchiveMateApp {
         compressButton.setBackground(new Color(31, 94, 176));
         compressButton.setFocusPainted(false);
         buttons.add(inspectButton);
+        previewButton.setToolTipText("Review planned ZIP entries and sizes without creating or changing files.");
+        buttons.add(previewButton);
         buttons.add(cancelButton);
         buttons.add(compressButton);
         footer.add(statusLabel, BorderLayout.NORTH);
@@ -302,6 +306,7 @@ public final class ArchiveMateApp {
         clearButton.addActionListener(e -> inputModel.clear());
         compressButton.addActionListener(e -> startCompression());
         inspectButton.addActionListener(e -> chooseInspection());
+        previewButton.addActionListener(e -> startPreview());
         cancelButton.addActionListener(e -> { if (worker != null) worker.cancel(true); });
     }
 
@@ -404,12 +409,10 @@ public final class ArchiveMateApp {
         statusLabel.setText(update.detail());
     }
 
-    private void startCompression() {
-        if (inputModel.isEmpty()) { showError("Add at least one file or folder first."); return; }
-        if (outputField.getText().isBlank()) { showError("Choose where to save the ZIP archive."); return; }
+    private CompressionRequest readCompressionRequest() {
+        if (inputModel.isEmpty()) { showError("Add at least one file or folder first."); return null; }
+        if (outputField.getText().isBlank()) { showError("Choose where to save the ZIP archive."); return null; }
         Path destination = Path.of(outputField.getText()).toAbsolutePath().normalize();
-        if (Files.exists(destination) && JOptionPane.showConfirmDialog(frame,
-                "This file already exists. Replace it?", "Confirm replacement", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
 
         Long targetBytes;
         try {
@@ -418,13 +421,66 @@ public final class ArchiveMateApp {
                     .setScale(0, RoundingMode.DOWN).longValueExact();
         } catch (NumberFormatException | ArithmeticException ex) {
             showError("Enter a valid target size in MB, such as 25 or 0.5.");
-            return;
+            return null;
         }
-        if (targetBytes != null && targetBytes < 1) { showError("Enter a target greater than 0 MB."); return; }
+        if (targetBytes != null && targetBytes < 1) { showError("Enter a target greater than 0 MB."); return null; }
 
         List<Path> inputs = new ArrayList<>();
         for (int i = 0; i < inputModel.size(); i++) inputs.add(inputModel.get(i));
-        int level = levelSlider.getValue();
+        return new CompressionRequest(List.copyOf(inputs), destination, levelSlider.getValue(), targetBytes);
+    }
+
+    private void startPreview() {
+        CompressionRequest request = readCompressionRequest();
+        if (request == null) return;
+        setBusy(true);
+        statusLabel.setText("Scanning inputs for ZIP preview…");
+        progressBar.setValue(0);
+        progressBar.setIndeterminate(true);
+        progressBar.setString("Scanning inputs…");
+        worker = new SwingWorker<ArchiveService.Preview, ProgressUpdate>() {
+            @Override
+            protected ArchiveService.Preview doInBackground() throws Exception {
+                return new ArchiveService().preview(request.inputs(), request.destination(), request.level(),
+                        request.targetBytes(), this::isCancelled);
+            }
+            @Override
+            protected void done() {
+                setBusy(false);
+                progressBar.setIndeterminate(false);
+                try {
+                    ArchiveService.Preview preview = get();
+                    progressBar.setValue(100);
+                    progressBar.setString("Preview ready");
+                    statusLabel.setText("Preview ready. No files were created or changed.");
+                    JOptionPane pane = new JOptionPane(new ArchivePreviewPanel(preview), JOptionPane.PLAIN_MESSAGE);
+                    JDialog dialog = pane.createDialog(frame, "ZIP preview");
+                    dialog.setResizable(true);
+                    dialog.setVisible(true);
+                    dialog.dispose();
+                } catch (CancellationException error) {
+                    progressBar.setString("Cancelled");
+                    statusLabel.setText("Preview cancelled. No files were created or changed.");
+                } catch (Exception error) {
+                    progressBar.setString("Error");
+                    statusLabel.setText("ZIP preview failed. No files were created or changed.");
+                    Throwable cause = error.getCause() == null ? error : error.getCause();
+                    showError(cause.getMessage() == null ? cause.toString() : cause.getMessage());
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    private void startCompression() {
+        CompressionRequest request = readCompressionRequest();
+        if (request == null) return;
+        Path destination = request.destination();
+        if (Files.exists(destination) && JOptionPane.showConfirmDialog(frame,
+                "This file already exists. Replace it?", "Confirm replacement", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+        List<Path> inputs = request.inputs();
+        int level = request.level();
+        Long targetBytes = request.targetBytes();
         setBusy(true);
         statusLabel.setText(targetBytes == null ? "Creating and verifying the ZIP archive…"
                 : "Testing ZIP levels 0–9 to find the smallest archive…");
@@ -488,6 +544,7 @@ public final class ArchiveMateApp {
 
     private void setBusy(boolean busy) {
         inspectButton.setEnabled(!busy);
+        previewButton.setEnabled(!busy);
         browseOutputButton.setEnabled(!busy);
         inputList.setEnabled(!busy);
         addFilesButton.setEnabled(!busy);
@@ -526,6 +583,7 @@ public final class ArchiveMateApp {
                   --output <path>     Destination ZIP archive (required).
                   --level <0-9>       Compression level; defaults to 9. Level 0 stores files.
                   --target-mb <size>  Try every level and keep the smallest verified ZIP.
+                  --dry-run          Preview entries and uncompressed sizes without creating files.
                   --help, -h          Show this help without opening the desktop app.
                   --                  Treat all remaining arguments as input paths.
 
@@ -536,6 +594,7 @@ public final class ArchiveMateApp {
                 Target sizes are best effort: lossless compression cannot guarantee a chosen size.
                 Original input files are left untouched.
                 Unknown options are errors. Use -- before input paths that begin with -.
+                Preview reads metadata only; compression scans inputs again before writing.
 
                 Example:
                   java -jar byteshrink.jar --cli --output backup.zip --level 9 ./Documents
@@ -577,6 +636,21 @@ public final class ArchiveMateApp {
         return args[index];
     }
 
+    private static void printPreview(ArchiveService.Preview preview) {
+        System.out.println("Dry run: no files were created or changed.");
+        System.out.println("Planned ZIP: " + ArchiveText.escape(preview.archive().toString()));
+        System.out.println("Files: " + preview.fileCount() + " | Folders: " + preview.directoryCount()
+                + " | Uncompressed bytes: " + preview.inputBytes());
+        System.out.println(preview.targetBytes() == null ? "ZIP level: " + preview.level()
+                : "ZIP levels: 0–9 | Target bytes: " + preview.targetBytes() + " (best effort)");
+        System.out.println("Metadata only: compressed size and content integrity are not checked. Compression scans inputs again.");
+        System.out.println("TYPE\tSIZE_BYTES\tENTRY\tSOURCE");
+        for (ArchiveService.PlannedEntry entry : preview.entries()) {
+            System.out.println((entry.directory() ? "DIR" : "FILE") + "\t" + entry.size() + "\t"
+                    + entry.displayName() + "\t" + ArchiveText.escape(entry.source().toString()));
+        }
+    }
+
     private static void runCli(String[] args) {
         if (args.length > 1 && isHelp(args[1])) {
             printCliHelp();
@@ -589,6 +663,7 @@ public final class ArchiveMateApp {
         Path output = null;
         int level = 9;
         Long targetBytes = null;
+        boolean dryRun = false;
         List<Path> inputs = new ArrayList<>();
         try {
             boolean inputPathsOnly = false;
@@ -603,6 +678,7 @@ public final class ArchiveMateApp {
                     case "--target-mb" -> targetBytes = new BigDecimal(requireCliValue(args, ++i))
                             .multiply(BigDecimal.valueOf(1_000_000L)).setScale(0, RoundingMode.DOWN).longValueExact();
                     case "--help", "-h" -> { printCliHelp(); return; }
+                    case "--dry-run" -> dryRun = true;
                     case "--" -> inputPathsOnly = true;
                     default -> {
                         if (args[i].startsWith("-")) {
@@ -614,6 +690,10 @@ public final class ArchiveMateApp {
                 }
             }
             if (output == null) throw new IllegalArgumentException("Specify --output archive.zip.");
+            if (dryRun) {
+                printPreview(new ArchiveService().preview(inputs, output, level, targetBytes, () -> false));
+                return;
+            }
             ArchiveService.Result result = new ArchiveService().compress(inputs, output, level, targetBytes,
                     (step, steps, done, total, detail) -> {
                         int percent = (int) Math.round(((double) step + (double) done / Math.max(1, total)) * 100 / steps);
